@@ -1,0 +1,334 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  SUPERVISOR
+  MANAGER
+  SELLER
+  SUPPORT
+}
+
+enum MotorcycleStatus {
+  AVAILABLE
+  RESERVED
+  SOLD
+  UNAVAILABLE
+  PREPARING
+}
+
+enum LeadStage {
+  NEW
+  WAITING
+  CONTACTED
+  NEGOTIATION
+  QUALIFIED
+  PROPOSAL
+  DECISION
+  WON
+  LOST
+}
+
+enum ActivityType {
+  CREATED
+  NOTE
+  STAGE_CHANGED
+  CALL
+  WHATSAPP
+  EMAIL
+  TASK
+  ASSIGNMENT
+  SYSTEM
+}
+
+model User {
+  id              String           @id @default(uuid()) @db.Uuid
+  name            String
+  email           String           @unique
+  passwordHash    String
+  role            UserRole         @default(SELLER)
+  isActive        Boolean          @default(true)
+  failedLoginCount Int             @default(0)
+  lockedUntil     DateTime?
+  seller          Seller?
+  activities      LeadActivity[]
+  refreshSessions RefreshSession[]
+  auditLogs       AuditLog[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([role, isActive])
+}
+
+model Seller {
+  id           String            @id @default(uuid()) @db.Uuid
+  userId       String?           @unique @db.Uuid
+  user         User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
+  name         String
+  slug         String            @unique
+  email        String?
+  phone        String?
+  whatsapp     String?
+  photoUrl     String?
+  bio          String?
+  isActive     Boolean           @default(true)
+  motorcycles  SellerMotorcycle[]
+  primaryMotos Motorcycle[]      @relation("PrimarySeller")
+  leads        Lead[]
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@index([isActive, name])
+}
+
+model Motorcycle {
+  id               String            @id @default(uuid()) @db.Uuid
+  slug             String            @unique
+  internalCode     String?           @unique
+  brand            String
+  model            String
+  version          String?
+  year             Int
+  modelYear        Int?
+  displacementCc   Int?
+  category         String?
+  color            String?
+  mileageKm        Int?
+  fuelType         String?
+  transmission     String?
+  priceCents       BigInt
+  promotionalCents BigInt?
+  description      String?
+  specifications   Json              @default("{}")
+  imageUrl         String?
+  isPublished      Boolean           @default(false)
+  isFeatured       Boolean           @default(false)
+  status           MotorcycleStatus @default(AVAILABLE)
+  primarySellerId  String?           @db.Uuid
+  primarySeller    Seller?           @relation("PrimarySeller", fields: [primarySellerId], references: [id], onDelete: SetNull)
+  sellers          SellerMotorcycle[]
+  images           MotorcycleImage[]
+  leads            Lead[]
+  interests        LeadInterest[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([isPublished, status, isFeatured])
+  @@index([brand, model, year])
+  @@index([priceCents])
+}
+
+model SellerMotorcycle {
+  sellerId     String     @db.Uuid
+  motorcycleId String     @db.Uuid
+  seller       Seller     @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  motorcycle   Motorcycle @relation(fields: [motorcycleId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+
+  @@id([sellerId, motorcycleId])
+}
+
+model MotorcycleImage {
+  id           String     @id @default(uuid()) @db.Uuid
+  motorcycleId String     @db.Uuid
+  motorcycle   Motorcycle @relation(fields: [motorcycleId], references: [id], onDelete: Cascade)
+  url          String
+  alt          String?
+  position     Int        @default(0)
+  isPrimary    Boolean    @default(false)
+  createdAt    DateTime   @default(now())
+
+  @@index([motorcycleId, position])
+}
+
+model Lead {
+  id              String          @id @default(uuid()) @db.Uuid
+  name            String
+  phone           String
+  normalizedPhone String
+  email           String?
+  message         String?
+  bestContactTime String?
+  source          String          @default("catalog")
+  sourcePage      String?
+  utm             Json            @default("{}")
+  stage           LeadStage       @default(NEW)
+  sellerId        String?         @db.Uuid
+  seller          Seller?         @relation(fields: [sellerId], references: [id], onDelete: SetNull)
+  motorcycleId    String?         @db.Uuid
+  motorcycle      Motorcycle?     @relation(fields: [motorcycleId], references: [id], onDelete: SetNull)
+  interests       LeadInterest[]
+  activities      LeadActivity[]
+  stageHistory    LeadStageHistory[]
+  tasks           Task[]
+  conversations   Conversation[]
+  consent         ConsentRecord?
+  requests        IdempotencyRecord[]
+  soldAt          DateTime?
+  salePriceCents  BigInt?
+  lostReason      String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([stage, createdAt])
+  @@index([sellerId, stage])
+  @@index([motorcycleId])
+  @@unique([normalizedPhone])
+  @@index([createdAt])
+}
+
+model IdempotencyRecord {
+  id        String   @id @default(uuid()) @db.Uuid
+  key       String   @unique
+  leadId    String   @db.Uuid
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([leadId, createdAt])
+}
+
+model LeadInterest {
+  id           String     @id @default(uuid()) @db.Uuid
+  leadId       String     @db.Uuid
+  motorcycleId String     @db.Uuid
+  lead         Lead       @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  motorcycle   Motorcycle @relation(fields: [motorcycleId], references: [id], onDelete: Restrict)
+  createdAt    DateTime   @default(now())
+
+  @@unique([leadId, motorcycleId])
+  @@index([motorcycleId])
+}
+
+model LeadActivity {
+  id        String       @id @default(uuid()) @db.Uuid
+  leadId    String       @db.Uuid
+  lead      Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  userId    String?      @db.Uuid
+  user      User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  type      ActivityType
+  content   String
+  metadata  Json         @default("{}")
+  createdAt DateTime     @default(now())
+
+  @@index([leadId, createdAt])
+}
+
+model LeadStageHistory {
+  id        String    @id @default(uuid()) @db.Uuid
+  leadId    String    @db.Uuid
+  lead      Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  fromStage LeadStage?
+  toStage   LeadStage
+  userId    String?   @db.Uuid
+  createdAt DateTime  @default(now())
+
+  @@index([leadId, createdAt])
+}
+
+model Task {
+  id          String    @id @default(uuid()) @db.Uuid
+  leadId      String    @db.Uuid
+  lead        Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  dueAt       DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([dueAt, completedAt])
+}
+
+model ConsentRecord {
+  id          String   @id @default(uuid()) @db.Uuid
+  leadId      String   @unique @db.Uuid
+  lead        Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  purpose     String
+  accepted    Boolean
+  policyVersion String
+  createdAt   DateTime @default(now())
+}
+
+model RefreshSession {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId, expiresAt])
+}
+
+model SystemSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+model AuditLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String?  @db.Uuid
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  entity    String
+  entityId  String?
+  metadata  Json     @default("{}")
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId, createdAt])
+}
+
+model WhatsAppInstance {
+  id           String        @id @default(uuid()) @db.Uuid
+  name         String        @unique
+  baseUrl      String?
+  isActive     Boolean       @default(false)
+  lastCheckedAt DateTime?
+  conversations Conversation[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model Conversation {
+  id         String           @id @default(uuid()) @db.Uuid
+  instanceId String           @db.Uuid
+  instance   WhatsAppInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  remoteJid  String
+  leadId     String?          @db.Uuid
+  lead       Lead?            @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  messages  Message[]
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  @@unique([instanceId, remoteJid])
+}
+
+model Message {
+  id             String       @id @default(uuid()) @db.Uuid
+  conversationId String       @db.Uuid
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  externalId     String?
+  content        String
+  fromMe          Boolean      @default(false)
+  status          String       @default("received")
+  createdAt       DateTime     @default(now())
+
+  @@unique([conversationId, externalId])
+  @@index([conversationId, createdAt])
+}
+
+model WebhookEvent {
+  id          String   @id @default(uuid()) @db.Uuid
+  externalId  String   @unique
+  event       String
+  payload     Json
+  processedAt DateTime?
+  createdAt   DateTime @default(now())
+}

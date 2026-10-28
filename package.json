@@ -1,0 +1,21 @@
+{
+  "name": "catalogo-motos",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev -w @catalogo/api\" \"npm run dev -w @catalogo/web\"",
+    "build": "npm run db:generate && npm run build -w @catalogo/api && npm run build -w @catalogo/web",
+    "typecheck": "npm run db:generate && npm run typecheck -w @catalogo/api && npm run typecheck -w @catalogo/web",
+    "db:generate": "npm run db:generate -w @catalogo/api",
+    "db:migrate": "npm run db:migrate -w @catalogo/api",
+    "db:seed": "npm run db:seed -w @catalogo/api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "~5.8.3"
+  }
+}

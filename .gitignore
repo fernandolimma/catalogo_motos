@@ -1,0 +1,15 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+*.log
+*.dump
+catalogo_motos.sql
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+apps/api/prisma/generated/
+apps/web/dist/
