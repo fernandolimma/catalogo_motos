@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { prisma } from "../db";
 import { allowRoles } from "../lib/auth";
+import { normalizePhone } from "../lib/phone";
 
 const listQuerySchema = z.object({
   q: z.string().trim().max(120).optional(),
@@ -48,6 +49,89 @@ async function mayAccessLead(request: FastifyRequest, leadId: string) {
 }
 
 export async function crmRoutes(app: FastifyInstance) {
+  app.post("/leads/manual", {
+    preHandler: allowRoles(UserRole.ADMIN, UserRole.SELLER),
+    schema: { tags: ["crm"], summary: "Cadastrar lead manualmente", security: [{ sessionCookie: [] }] },
+  }, async (request, reply) => {
+    const body = z.object({
+      sellerId: z.string().uuid().optional(),
+      name: z.string().trim().min(2).max(120),
+      phone: z.string().trim().min(10).max(30),
+      email: z.string().trim().email().max(254),
+      bestContactTime: z.string().trim().max(100).optional(),
+      message: z.string().trim().max(2000).optional(),
+      originId: z.string().uuid(),
+    }).parse(request.body);
+    const normalizedPhone = normalizePhone(body.phone);
+    if (!normalizedPhone) {
+      return reply.code(400).send({ error: "invalid_phone", message: "Informe um telefone com DDD válido." });
+    }
+
+    const [seller, origin, duplicate] = await Promise.all([
+      request.user.role === UserRole.SELLER
+        ? prisma.seller.findUnique({ where: { userId: request.user.sub }, select: { id: true, isActive: true } })
+        : body.sellerId
+          ? prisma.seller.findUnique({ where: { id: body.sellerId }, select: { id: true, isActive: true } })
+          : Promise.resolve(null),
+      prisma.motorcycleOption.findUnique({ where: { id: body.originId }, select: { id: true, type: true, value: true } }),
+      prisma.lead.findUnique({ where: { normalizedPhone }, select: { id: true } }),
+    ]);
+    if (!seller?.isActive) {
+      return reply.code(400).send({ error: "invalid_seller", message: "Selecione um vendedor ativo para o atendimento." });
+    }
+    if (request.user.role === UserRole.ADMIN && !body.sellerId) {
+      return reply.code(400).send({ error: "missing_seller", message: "Selecione o vendedor responsável pelo atendimento." });
+    }
+    if (!origin || origin.type !== "ORIGIN") {
+      return reply.code(400).send({ error: "invalid_origin", message: "Selecione uma origem válida nas configurações." });
+    }
+    if (duplicate) {
+      return reply.code(409).send({ error: "lead_exists", message: "Já existe um lead cadastrado com este telefone." });
+    }
+
+    try {
+      const lead = await prisma.$transaction(async (tx) => {
+        const created = await tx.lead.create({
+          data: {
+            name: body.name,
+            phone: body.phone,
+            normalizedPhone,
+            email: body.email,
+            bestContactTime: body.bestContactTime,
+            message: body.message,
+            source: origin.value,
+            sellerId: seller.id,
+            stageHistory: { create: { toStage: LeadStage.NEW, userId: request.user.sub } },
+            activities: {
+              create: {
+                userId: request.user.sub,
+                type: ActivityType.CREATED,
+                content: "Lead cadastrado manualmente.",
+                metadata: { source: origin.value } as Prisma.InputJsonValue,
+              },
+            },
+          },
+        });
+        await tx.auditLog.create({
+          data: {
+            userId: request.user.sub,
+            action: "lead.created.manually",
+            entity: "Lead",
+            entityId: created.id,
+            metadata: { source: origin.value, sellerId: seller.id } as Prisma.InputJsonValue,
+          },
+        });
+        return created;
+      });
+      return reply.code(201).send({ lead });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        return reply.code(409).send({ error: "lead_exists", message: "Já existe um lead cadastrado com este telefone." });
+      }
+      throw error;
+    }
+  });
+
   app.get("/leads", {
     preHandler: allowRoles("ADMIN", "SUPERVISOR", "MANAGER", "SELLER", "SUPPORT"),
     schema: { tags: ["crm"], summary: "Listar leads com paginação", security: [{ sessionCookie: [] }] },
@@ -103,6 +187,99 @@ export async function crmRoutes(app: FastifyInstance) {
     });
     if (!lead) return reply.code(404).send({ error: "not_found", message: "Lead não encontrado." });
     return reply.send({ lead });
+  });
+
+  app.patch("/leads/:id/contact", {
+    preHandler: allowRoles("ADMIN", "SUPERVISOR", "MANAGER", "SELLER", "SUPPORT"),
+    schema: { tags: ["crm"], summary: "Editar dados de contato do lead", security: [{ sessionCookie: [] }] },
+  }, async (request, reply) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = z.object({
+      name: z.string().trim().min(2).max(120),
+      phone: z.string().trim().min(10).max(30),
+      email: z.string().trim().max(254).email().or(z.literal("")),
+    }).parse(request.body);
+    const normalizedPhone = normalizePhone(body.phone);
+    if (!normalizedPhone) {
+      return reply.code(400).send({ error: "invalid_phone", message: "Informe um telefone com DDD válido." });
+    }
+
+    const scope = await leadScope(request, { id });
+    const current = await prisma.lead.findFirst({ where: scope, select: { id: true, name: true, phone: true, email: true, normalizedPhone: true } });
+    if (!current) return reply.code(404).send({ error: "not_found", message: "Contato não encontrado." });
+
+    const duplicate = await prisma.lead.findFirst({
+      where: { normalizedPhone, id: { not: id } },
+      select: { id: true },
+    });
+    if (duplicate) {
+      return reply.code(409).send({ error: "lead_exists", message: "Já existe um lead cadastrado com este telefone." });
+    }
+
+    const changedFields = [
+      ...(current.name !== body.name ? ["nome"] : []),
+      ...(current.phone !== body.phone || current.normalizedPhone !== normalizedPhone ? ["telefone"] : []),
+      ...(current.email !== (body.email || null) ? ["e-mail"] : []),
+    ];
+    try {
+      const lead = await prisma.$transaction(async (tx) => {
+        const updated = await tx.lead.update({
+          where: { id },
+          data: { name: body.name, phone: body.phone, normalizedPhone, email: body.email || null },
+          select: { id: true, name: true, phone: true, email: true, createdAt: true },
+        });
+        if (changedFields.length) {
+          await tx.leadActivity.create({
+            data: {
+              leadId: id,
+              userId: request.user.sub,
+              type: ActivityType.NOTE,
+              content: `Dados de contato atualizados: ${changedFields.join(", ")}.`,
+            },
+          });
+          await tx.auditLog.create({
+            data: {
+              userId: request.user.sub,
+              action: "lead.contact.updated",
+              entity: "Lead",
+              entityId: id,
+              metadata: { changedFields } as Prisma.InputJsonValue,
+            },
+          });
+        }
+        return updated;
+      });
+      return reply.send({ lead });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        return reply.code(409).send({ error: "lead_exists", message: "Já existe um lead cadastrado com este telefone." });
+      }
+      throw error;
+    }
+  });
+
+  app.delete("/leads/:id", {
+    preHandler: allowRoles("ADMIN"),
+    schema: { tags: ["crm"], summary: "Excluir lead e seus dados vinculados", security: [{ sessionCookie: [] }] },
+  }, async (request, reply) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params);
+    const scope = await leadScope(request, { id });
+    const lead = await prisma.lead.findFirst({ where: scope, select: { id: true } });
+    if (!lead) return reply.code(404).send({ error: "not_found", message: "Contato não encontrado." });
+
+    await prisma.$transaction(async (tx) => {
+      await tx.auditLog.create({
+        data: {
+          userId: request.user.sub,
+          action: "lead.deleted",
+          entity: "Lead",
+          entityId: id,
+          metadata: { deleted: true } as Prisma.InputJsonValue,
+        },
+      });
+      await tx.lead.delete({ where: { id } });
+    });
+    return reply.send({ deleted: true });
   });
 
   app.patch("/crm/leads/:id/stage", {

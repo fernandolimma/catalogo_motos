@@ -15,13 +15,13 @@ const catalogQuery = z.object({
 });
 
 const leadSchema = z.object({
+  sellerSlug: z.string().trim().min(1).max(180),
   name: z.string().trim().min(2).max(120),
   phone: z.string().trim().min(10).max(30),
-  email: z.union([z.string().email().max(254), z.literal("")]).optional(),
+  email: z.string().trim().email().max(254),
   message: z.string().trim().max(2000).optional(),
   bestContactTime: z.string().trim().max(100).optional(),
   motorcycleSlug: z.string().trim().max(180).optional(),
-  sellerSlug: z.string().trim().max(180).optional(),
   sourcePage: z.string().trim().max(500).optional(),
   utm: z.record(z.string().max(200)).optional(),
   consent: z.literal(true),
@@ -98,7 +98,7 @@ export async function publicRoutes(app: FastifyInstance) {
     const seller = await prisma.seller.findFirst({
       where: { slug, isActive: true },
       select: {
-        name: true, slug: true, bio: true, photoUrl: true, whatsapp: true,
+        id: true, name: true, slug: true, bio: true, photoUrl: true, whatsapp: true,
         primaryMotos: {
           where: { isPublished: true, status: "AVAILABLE" },
           include: { images: { orderBy: { position: "asc" } } },
@@ -110,12 +110,21 @@ export async function publicRoutes(app: FastifyInstance) {
       },
     });
     if (!seller) return reply.code(404).send({ error: "not_found", message: "Vendedor não encontrado." });
+    const motorcyclesAvailableToAll = await prisma.motorcycle.findMany({
+      where: {
+        isPublished: true,
+        status: "AVAILABLE",
+        availableToAllSellers: true,
+      },
+      include: { images: { orderBy: { position: "asc" } } },
+    });
     return reply.send({
       seller: {
         ...seller,
         motorcycles: [
           ...seller.primaryMotos,
           ...seller.motorcycles.map(({ motorcycle }) => motorcycle),
+          ...motorcyclesAvailableToAll,
         ].filter((motorcycle, index, list) => list.findIndex((item) => item.id === motorcycle.id) === index)
           .map(publicMotorcycle),
       },
@@ -140,11 +149,11 @@ export async function publicRoutes(app: FastifyInstance) {
       summary: "Registrar interesse no catálogo",
       body: {
         type: "object",
-        required: ["name", "phone", "consent"],
+        required: ["sellerSlug", "name", "phone", "email", "consent"],
         properties: {
           name: { type: "string", minLength: 2 },
           phone: { type: "string", description: "Telefone com DDD." },
-          email: { type: "string", format: "email" },
+          email: { type: "string", format: "email", maxLength: 254 },
           message: { type: "string" },
           bestContactTime: { type: "string" },
           motorcycleSlug: { type: "string" },
@@ -189,20 +198,12 @@ export async function publicRoutes(app: FastifyInstance) {
     if (body.motorcycleSlug && !motorcycle) {
       return reply.code(409).send({ error: "unavailable", message: "Esta motocicleta não está mais disponível." });
     }
-    const seller = body.sellerSlug
-      ? await prisma.seller.findFirst({ where: { slug: body.sellerSlug, isActive: true }, select: { id: true } })
-      : null;
-    if (body.sellerSlug && !seller) {
+    const seller = await prisma.seller.findFirst({
+      where: { slug: body.sellerSlug, isActive: true },
+      select: { id: true },
+    });
+    if (!seller) {
       return reply.code(404).send({ error: "seller_not_found", message: "Vendedor não encontrado." });
-    }
-    if (seller && motorcycle && seller.id !== motorcycle.primarySellerId) {
-      const association = await prisma.sellerMotorcycle.findUnique({
-        where: { sellerId_motorcycleId: { sellerId: seller.id, motorcycleId: motorcycle.id } },
-        select: { sellerId: true },
-      });
-      if (!association) {
-        return reply.code(409).send({ error: "seller_not_assigned", message: "Este vendedor não está associado à motocicleta." });
-      }
     }
 
     const email = body.email || undefined;
@@ -233,10 +234,11 @@ export async function publicRoutes(app: FastifyInstance) {
             sourcePage: body.sourcePage,
             utm: (body.utm ?? {}) as Prisma.InputJsonValue,
             motorcycleId: motorcycle?.id,
-            sellerId: seller?.id ?? motorcycle?.primarySellerId,
+            sellerId: seller.id,
             stageHistory: { create: { toStage: "NEW" } },
           },
           update: {
+            sellerId: seller.id,
             ...(email ? { email } : {}),
             ...(body.message ? { message: body.message } : {}),
             ...(body.bestContactTime ? { bestContactTime: body.bestContactTime } : {}),

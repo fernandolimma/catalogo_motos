@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Activity, ArrowDownRight, ArrowUpRight, Bike, CheckCheck, CircleHelp, ClipboardList, Download, LogOut, Search, Users, X } from "lucide-react";
+import { Activity, ArrowDownRight, ArrowUpRight, CheckCheck, CircleHelp, ClipboardList, Download, Search, Users, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
+import { AdminShell } from "../components/admin-shell";
 import { api, errorMessage } from "../lib/api";
 import { formatBRL, leadStages, stageLabels, type Lead } from "../lib/types";
 
@@ -72,14 +73,6 @@ function downloadReport(report: SalesReport) {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-const roleLabels: Record<string, string> = {
-  ADMIN: "Administrador",
-  SUPERVISOR: "Supervisor",
-  MANAGER: "Gerente",
-  SELLER: "Vendedor",
-  SUPPORT: "Suporte",
-};
-
 export function AdminPage() {
   const navigate = useNavigate();
   const cache = useQueryClient();
@@ -137,14 +130,6 @@ export function AdminPage() {
       await cache.invalidateQueries({ queryKey: ["lead-detail", selectedLead] });
     },
   });
-  const logout = useMutation({
-    mutationFn: () => api.post("/auth/logout"),
-    onSuccess: async () => {
-      await cache.clear();
-      await navigate({ to: "/login" });
-    },
-  });
-
   if (auth.isLoading || !auth.isSuccess) {
     return <main className="flex min-h-screen items-center justify-center bg-paper text-sm text-muted">Verificando sessão...</main>;
   }
@@ -156,23 +141,12 @@ export function AdminPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-[#f6f7f3]">
-      <header className="border-b border-black/5 bg-white">
-        <div className="page-wrap flex h-[72px] items-center justify-between">
-          <div className="flex items-center gap-3"><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-lime text-pine"><Bike size={18} /></span><span className="font-black tracking-tight">INDEPENDÊNCIA <span className="text-pine">CRM</span></span></div>
-          <div className="flex items-center gap-4">
-            <div className="hidden text-right sm:block"><p className="text-xs font-bold">{currentUser?.name}</p><p className="text-[10px] text-muted">{currentUser?.role ? roleLabels[currentUser.role] ?? currentUser.role : "Perfil"}</p></div>
-            {["ADMIN", "SUPERVISOR", "MANAGER"].includes(currentUser?.role ?? "") && <Link to="/admin/estoque"><Button variant="outline" size="small"><Bike size={14} /> Estoque</Button></Link>}
-            <Button variant="outline" size="small" onClick={() => logout.mutate()} disabled={logout.isPending}><LogOut size={14} /> Sair</Button>
-          </div>
-        </div>
-      </header>
-      <main className="page-wrap py-9 sm:py-12">
+    <AdminShell userName={currentUser?.name ?? "Usuário"} role={currentUser?.role ?? "SELLER"}>
+      <div className="page-wrap py-4 sm:py-5">
         <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
           <div><p className="text-xs font-extrabold uppercase tracking-[.18em] text-pine">Painel comercial</p><h1 className="mt-2 text-3xl font-black tracking-tight sm:text-4xl">Olá{currentUser?.name ? `, ${currentUser.name.split(" ")[0]}` : ""}.</h1><p className="mt-2 text-sm text-muted">Acompanhe os contatos e a evolução do atendimento.</p></div>
           <div className="flex items-center gap-2">
             {currentUser?.role === "SUPERVISOR" && <span className="rounded-full bg-lime px-2.5 py-1 text-[10px] font-bold uppercase tracking-[.15em] text-pine">Supervisor</span>}
-            <Link to="/"><Button variant="outline" size="small"><ArrowUpRight size={14} /> Ver catálogo público</Button></Link>
           </div>
         </div>
 
@@ -337,7 +311,7 @@ export function AdminPage() {
             </div>}
           </aside>
         </div>}
-      </main>
-    </div>
+      </div>
+    </AdminShell>
   );
 }

@@ -37,7 +37,7 @@ export async function authRoutes(app: FastifyInstance) {
     }
 
     await prisma.user.update({ where: { id: user.id }, data: { failedLoginCount: 0, lockedUntil: null } });
-    const token = await reply.jwtSign({ sub: user.id, email: user.email, role: user.role });
+    const token = await reply.jwtSign({ sub: user.id, email: user.email, role: user.role, ver: user.authVersion });
     setAuthCookie(reply, token);
     return reply.send({ user: { id: user.id, name: user.name, email: user.email, role: user.role } });
   });
@@ -53,7 +53,10 @@ export async function authRoutes(app: FastifyInstance) {
   }, async (request, reply) => {
     const user = await prisma.user.findUnique({
       where: { id: request.user.sub },
-      select: { id: true, name: true, email: true, role: true, isActive: true },
+      select: {
+        id: true, name: true, email: true, role: true, isActive: true,
+        seller: { select: { id: true, name: true } },
+      },
     });
     if (!user?.isActive) {
       reply.clearCookie("catalogo_session", { path: "/" });

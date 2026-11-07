@@ -23,6 +23,15 @@ enum MotorcycleStatus {
   PREPARING
 }
 
+enum MotorcycleOptionType {
+  GROUP
+  MODEL
+  CATEGORY
+  YEAR
+  VERSION
+  ORIGIN
+}
+
 enum LeadStage {
   NEW
   WAITING
@@ -54,6 +63,7 @@ model User {
   passwordHash    String
   role            UserRole         @default(SELLER)
   isActive        Boolean          @default(true)
+  authVersion     Int              @default(0)
   failedLoginCount Int             @default(0)
   lockedUntil     DateTime?
   seller          Seller?
@@ -94,11 +104,13 @@ model Motorcycle {
   brand            String
   model            String
   version          String?
-  year             Int
+  year             String
   modelYear        Int?
   displacementCc   Int?
+  group            String?
   category         String?
   color            String?
+  colors           String[]          @default([])
   mileageKm        Int?
   fuelType         String?
   transmission     String?
@@ -108,7 +120,8 @@ model Motorcycle {
   specifications   Json              @default("{}")
   imageUrl         String?
   isPublished      Boolean           @default(false)
-  isFeatured       Boolean           @default(false)
+  availableToAllSellers Boolean      @default(false)
+  isFeatured      Boolean           @default(false)
   status           MotorcycleStatus @default(AVAILABLE)
   primarySellerId  String?           @db.Uuid
   primarySeller    Seller?           @relation("PrimarySeller", fields: [primarySellerId], references: [id], onDelete: SetNull)
@@ -122,6 +135,15 @@ model Motorcycle {
   @@index([isPublished, status, isFeatured])
   @@index([brand, model, year])
   @@index([priceCents])
+}
+
+model MotorcycleOption {
+  id        String               @id @default(uuid()) @db.Uuid
+  type      MotorcycleOptionType
+  value     String
+  createdAt DateTime             @default(now())
+
+  @@unique([type, value])
 }
 
 model SellerMotorcycle {
@@ -303,7 +325,11 @@ model Conversation {
   remoteJid  String
   leadId     String?          @db.Uuid
   lead       Lead?            @relation(fields: [leadId], references: [id], onDelete: SetNull)
-  messages  Message[]
+  isPinned   Boolean          @default(false)
+  isArchived Boolean          @default(false)
+  isMuted    Boolean          @default(false)
+  isStarred  Boolean          @default(false)
+  messages   Message[]
   createdAt  DateTime         @default(now())
   updatedAt  DateTime         @updatedAt
 
@@ -318,6 +344,14 @@ model Message {
   content        String
   fromMe          Boolean      @default(false)
   status          String       @default("received")
+  isRead          Boolean      @default(false)
+  mediaType       String?
+  mimeType        String?
+  fileName        String?
+  quotedContent   String?
+  reaction        String?
+  isDeleted       Boolean      @default(false)
+  providerPayload Json?
   createdAt       DateTime     @default(now())
 
   @@unique([conversationId, externalId])

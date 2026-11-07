@@ -1,16 +1,18 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { CheckCircle2, LoaderCircle, Send } from "lucide-react";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 import { api, errorMessage } from "../lib/api";
 import { getCampaignParams } from "../lib/campaign";
+import type { Seller } from "../lib/types";
 import { Button } from "./ui/button";
 
 const interestSchema = z.object({
+  sellerSlug: z.string().min(1, "Selecione o vendedor que fará o atendimento."),
   name: z.string().trim().min(2, "Informe seu nome completo."),
   phone: z.string().trim().min(10, "Informe seu telefone com DDD."),
-  email: z.union([z.string().email("Informe um e-mail válido."), z.literal("")]),
+  email: z.string().trim().min(1, "Informe seu e-mail.").email("Informe um e-mail válido.").max(254),
   message: z.string().max(2000),
   bestContactTime: z.string(),
   consent: z.boolean().refine((value) => value, "Precisamos da sua autorização para responder ao contato."),
@@ -20,17 +22,27 @@ type InterestValues = z.infer<typeof interestSchema>;
 
 type InterestFormProps = { motorcycleSlug?: string; sellerSlug?: string; compact?: boolean };
 
+function formatPhone(value: string) {
+  const digits = value.replace(/\D/g, "").slice(0, 11);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 7) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+}
+
 export function InterestForm({ motorcycleSlug, sellerSlug, compact = false }: InterestFormProps) {
+  const sellers = useQuery({
+    queryKey: ["public-sellers"],
+    queryFn: async () => (await api.get<{ items: Seller[] }>("/public/sellers")).data.items,
+  });
   const form = useForm<InterestValues>({
     resolver: zodResolver(interestSchema),
-    defaultValues: { name: "", phone: "", email: "", message: "", bestContactTime: "", consent: false },
+    defaultValues: { sellerSlug: sellerSlug ?? "", name: "", phone: "", email: "", message: "", bestContactTime: "", consent: false },
   });
   const mutation = useMutation({
     mutationFn: async (values: InterestValues) => {
       const { data } = await api.post("/public/leads", {
         ...values,
         motorcycleSlug,
-        sellerSlug,
         sourcePage: window.location.href,
         utm: getCampaignParams(),
       }, { headers: { "Idempotency-Key": crypto.randomUUID() } });
@@ -50,18 +62,48 @@ export function InterestForm({ motorcycleSlug, sellerSlug, compact = false }: In
 
   const onSubmit = form.handleSubmit((values) => mutation.mutate(values));
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
+    <form onSubmit={(event) => {
+      if (!sellers.isSuccess || sellers.data.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      void onSubmit(event);
+    }} className="space-y-4">
+      <label className="field-label">Vendedor responsável pelo atendimento
+        <select className="field-input" {...form.register("sellerSlug")} disabled={sellers.isLoading || sellers.isError || sellers.data?.length === 0}>
+          <option value="">{sellers.isLoading ? "Carregando vendedores..." : "Selecione um vendedor"}</option>
+          {sellers.data?.map((seller) => <option key={seller.slug} value={seller.slug}>{seller.name}</option>)}
+        </select>
+        {form.formState.errors.sellerSlug && <span className="field-error">{form.formState.errors.sellerSlug.message}</span>}
+        {sellers.isError && <span className="field-error" role="alert">Não foi possível carregar os vendedores. Tente novamente.</span>}
+        {sellers.isSuccess && sellers.data.length === 0 && <span className="field-error" role="alert">Nenhum vendedor está disponível para atendimento no momento.</span>}
+      </label>
       <label className="field-label">Seu nome
         <input className="field-input" autoComplete="name" {...form.register("name")} placeholder="Nome completo" />
         {form.formState.errors.name && <span className="field-error">{form.formState.errors.name.message}</span>}
       </label>
       <div className={`grid gap-4 ${compact ? "" : "sm:grid-cols-2"}`}>
         <label className="field-label">Telefone / WhatsApp
-          <input className="field-input" autoComplete="tel" inputMode="tel" {...form.register("phone")} placeholder="(00) 00000-0000" />
+          <Controller
+            control={form.control}
+            name="phone"
+            render={({ field }) => (
+              <input
+                {...field}
+                className="field-input"
+                autoComplete="tel"
+                inputMode="tel"
+                maxLength={15}
+                placeholder="(00) 00000-0000"
+                value={formatPhone(field.value)}
+                onChange={(event) => field.onChange(formatPhone(event.target.value))}
+              />
+            )}
+          />
           {form.formState.errors.phone && <span className="field-error">{form.formState.errors.phone.message}</span>}
         </label>
-        <label className="field-label">E-mail <span className="font-normal text-muted">(opcional)</span>
-          <input className="field-input" autoComplete="email" type="email" {...form.register("email")} placeholder="voce@email.com" />
+        <label className="field-label">E-mail
+          <input className="field-input" autoComplete="email" type="email" required {...form.register("email")} placeholder="voce@email.com" />
           {form.formState.errors.email && <span className="field-error">{form.formState.errors.email.message}</span>}
         </label>
       </div>
@@ -77,7 +119,7 @@ export function InterestForm({ motorcycleSlug, sellerSlug, compact = false }: In
       </label>
       {form.formState.errors.consent && <p className="field-error">{form.formState.errors.consent.message}</p>}
       {mutation.isError && <p className="field-error" role="alert">{errorMessage(mutation.error)}</p>}
-      <Button className="w-full" type="submit" disabled={mutation.isPending}>
+      <Button className="w-full" type="submit" disabled={mutation.isPending || !sellers.isSuccess || sellers.data.length === 0}>
         {mutation.isPending ? <LoaderCircle className="animate-spin" size={17} /> : <Send size={16} />}
         {mutation.isPending ? "Enviando..." : "Quero saber mais"}
       </Button>

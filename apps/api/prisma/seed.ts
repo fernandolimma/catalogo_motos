@@ -33,7 +33,7 @@ async function main() {
         slug: "demo-honda-cg-160-2024",
         brand: "DEMO",
         model: "Motocicleta de demonstração",
-        year: 2024,
+        year: "2024",
         priceCents: 0n,
         description: "Registro demonstrativo de desenvolvimento. Substitua pelos dados reais da loja.",
         isPublished: false,

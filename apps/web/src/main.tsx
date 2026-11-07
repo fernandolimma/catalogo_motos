@@ -11,6 +11,12 @@ import { PrivacyPage } from "./pages/privacy";
 import { SellerPage } from "./pages/seller";
 import { AdminPage } from "./pages/admin";
 import { InventoryPage } from "./pages/inventory";
+import { UsersPage } from "./pages/users";
+import { PipelinePage } from "./pages/pipeline";
+import { SettingsPage } from "./pages/settings";
+import { LeadCreatePage } from "./pages/lead-create";
+import { WhatsAppPage } from "./pages/whatsapp";
+import { ContactsPage } from "./pages/contacts";
 import { captureCampaignParams } from "./lib/campaign";
 import { z } from "zod";
 import "./styles.css";
@@ -35,7 +41,25 @@ const sellerRoute = createRoute({ getParentRoute: () => rootRoute, path: "/vende
 const privacyRoute = createRoute({ getParentRoute: () => rootRoute, path: "/privacidade", component: withPublicLayout(PrivacyPage) });
 const loginRoute = createRoute({ getParentRoute: () => rootRoute, path: "/login", component: LoginPage });
 const adminRoute = createRoute({ getParentRoute: () => rootRoute, path: "/admin", component: AdminPage });
+const pipelineRoute = createRoute({ getParentRoute: () => rootRoute, path: "/admin/funil", component: PipelinePage });
 const inventoryRoute = createRoute({ getParentRoute: () => rootRoute, path: "/admin/estoque", component: InventoryPage });
+const motorcycleFormRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/motocicletas/cadastrar",
+  validateSearch: z.object({ edit: z.string().optional() }),
+  component: InventoryPage,
+});
+const sellersRoute = createRoute({ getParentRoute: () => rootRoute, path: "/admin/vendedores", component: InventoryPage });
+const usersRoute = createRoute({ getParentRoute: () => rootRoute, path: "/admin/usuarios", component: UsersPage });
+const settingsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/admin/configuracoes", component: SettingsPage });
+const leadCreateRoute = createRoute({ getParentRoute: () => rootRoute, path: "/admin/leads/cadastrar", component: LeadCreatePage });
+const contactsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/admin/contatos", component: ContactsPage });
+const whatsappRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/whatsapp",
+  validateSearch: z.object({ leadId: z.string().optional() }),
+  component: WhatsAppPage,
+});
 const routeTree = rootRoute.addChildren([
   homeRoute,
   motorcycleRoute,
@@ -43,7 +67,15 @@ const routeTree = rootRoute.addChildren([
   privacyRoute,
   loginRoute,
   adminRoute,
+  pipelineRoute,
   inventoryRoute,
+  motorcycleFormRoute,
+  sellersRoute,
+  usersRoute,
+  settingsRoute,
+  leadCreateRoute,
+  contactsRoute,
+  whatsappRoute,
 ]);
 const router = createRouter({ routeTree, defaultPreload: "intent" });
 const queryClient = new QueryClient({

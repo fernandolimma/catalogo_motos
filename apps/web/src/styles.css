@@ -24,6 +24,13 @@ a { color: inherit; text-decoration: none; }
 .field-input:focus { border-color: #224d38; box-shadow: 0 0 0 3px rgba(34,77,56,.1); }
 .field-input::placeholder { color: #9aa39b; }
 .field-error { color: #b42318; font-size: .7rem; font-weight: 600; }
+.whatsapp-wallpaper {
+  background-color: #0b141a;
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'%3E%3Cg fill='none' stroke='%2315222b' stroke-width='2' opacity='.72'%3E%3Cpath d='M18 28c0-7 6-12 13-12s13 5 13 12-6 12-13 12c-3 0-5-1-7-2l-7 3 2-7c-1-2-1-4-1-6zm4 0h1m8 0h1m-8 5c2 2 5 2 7 0M94 21l4 8 9 1-7 6 2 9-8-5-8 5 2-9-7-6 9-1zM143 67c9-10 22 3 12 13l-12 12-12-12c-10-10 3-23 12-13zM24 111h31v22H24zM32 111v22m15-22v22M24 119h31m-31 7h31M102 106c0-10 8-18 18-18s18 8 18 18-8 18-18 18-18-8-18-18zm8 0c0-6 4-10 10-10s10 4 10 10-4 10-10 10-10-4-10-10zM39 62l18 18m0-18L39 80m90 49 17 17m0-17-17 17M74 145c0-7 6-13 13-13s13 6 13 13v15H74z'/%3E%3C/g%3E%3C/svg%3E"),
+    radial-gradient(circle at 25% 20%, rgba(32, 44, 51, .28), transparent 34%);
+  background-repeat: repeat, no-repeat;
+}
 
 @media (min-width: 640px) {
   .page-wrap { width: min(100% - 3rem, 1200px); }

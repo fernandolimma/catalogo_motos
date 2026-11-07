@@ -15,21 +15,24 @@ export function MotorcyclePage() {
   });
 
   if (query.isLoading) return <div className="page-wrap py-24 text-center text-sm text-muted">Carregando detalhes...</div>;
-  if (query.isError || !query.data) return <div className="page-wrap py-24 text-center"><p className="text-lg font-bold">Esta motocicleta não está disponível.</p><Link className="mt-5 inline-block text-sm font-bold text-pine underline" to="/">Voltar ao catálogo</Link></div>;
+  if (query.isError || !query.data) return <div className="page-wrap py-24 text-center"><p className="text-lg font-bold">Esta motocicleta não está disponível.</p>{sellerSlug ? <Link className="mt-5 inline-block text-sm font-bold text-pine underline" to="/vendedor/$slug" params={{ slug: sellerSlug }}>Voltar ao catálogo</Link> : <Link className="mt-5 inline-block text-sm font-bold text-pine underline" to="/">Voltar ao catálogo</Link>}</div>;
   const motorcycle = query.data;
   const image = motorcycle.images?.find((item) => item.url)?.url ?? motorcycle.imageUrl;
   document.title = `${motorcycle.brand} ${motorcycle.model} | Independência Motos`;
   const specs = [
-    ["Ano", `${motorcycle.year}${motorcycle.modelYear ? ` / ${motorcycle.modelYear}` : ""}`],
+    ["Ano", `${motorcycle.year}${motorcycle.modelYear && String(motorcycle.modelYear) !== motorcycle.year ? ` / ${motorcycle.modelYear}` : ""}`],
     ["Cilindrada", motorcycle.displacementCc ? `${motorcycle.displacementCc} cc` : null],
     ["Quilometragem", motorcycle.mileageKm !== null && motorcycle.mileageKm !== undefined ? `${new Intl.NumberFormat("pt-BR").format(motorcycle.mileageKm)} km` : null],
+    ["Grupo", motorcycle.group],
     ["Cor", motorcycle.color],
     ["Categoria", motorcycle.category],
   ].filter((item): item is [string, string] => Boolean(item[1]));
 
   return (
     <div className="page-wrap py-10 sm:py-16">
-      <Link to="/" className="inline-flex items-center gap-2 text-sm font-semibold text-muted hover:text-ink"><ArrowLeft size={16} /> Voltar ao catálogo</Link>
+      {sellerSlug
+        ? <Link to="/vendedor/$slug" params={{ slug: sellerSlug }} className="inline-flex items-center gap-2 text-sm font-semibold text-muted hover:text-ink"><ArrowLeft size={16} /> Voltar ao catálogo</Link>
+        : <Link to="/" className="inline-flex items-center gap-2 text-sm font-semibold text-muted hover:text-ink"><ArrowLeft size={16} /> Voltar ao catálogo</Link>}
       <div className="mt-8 grid items-start gap-8 lg:grid-cols-[1.1fr_.9fr]">
         <div>
           <div className="flex aspect-[1.35] items-center justify-center overflow-hidden rounded-[2rem] bg-[#e8ede5]">
@@ -41,7 +44,15 @@ export function MotorcyclePage() {
             <h1 className="mt-2 font-display text-4xl font-black tracking-[-.04em] sm:text-5xl">{motorcycle.model}{motorcycle.version ? ` ${motorcycle.version}` : ""}</h1>
             {motorcycle.description && <p className="mt-5 whitespace-pre-line text-sm leading-7 text-muted">{motorcycle.description}</p>}
             <h2 className="mt-9 text-lg font-extrabold">Ficha da motocicleta</h2>
-            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">{specs.map(([label, value]) => <Card key={label} className="rounded-2xl p-4"><p className="text-[10px] font-bold uppercase tracking-widest text-muted">{label}</p><p className="mt-2 font-bold">{value}</p></Card>)}</div>
+            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {specs.map(([label, value]) => <Card key={label} className="rounded-2xl p-4"><p className="text-[10px] font-bold uppercase tracking-widest text-muted">{label}</p><p className="mt-2 font-bold">{value}</p></Card>)}
+              {motorcycle.colors && motorcycle.colors.length > 0 && <Card className="rounded-2xl p-4">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted">Cores disponíveis</p>
+                <ul className="mt-2 flex flex-wrap gap-2">
+                  {motorcycle.colors.map((color) => <li key={color} title={color} aria-label={`Cor ${color}`} className="h-7 w-7 rounded-full border border-black/15" style={{ backgroundColor: color }} />)}
+                </ul>
+              </Card>}
+            </div>
             <div className="mt-6 flex items-start gap-3 rounded-2xl bg-[#ebefe8] p-4 text-xs leading-5 text-ink/65"><ShieldCheck size={18} className="shrink-0 text-pine" />Disponibilidade e informações comerciais podem mudar. Confirme os detalhes com a equipe.</div>
           </div>
         </div>

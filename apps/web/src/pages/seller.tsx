@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, MessageCircle } from "lucide-react";
-import { Link, useParams } from "@tanstack/react-router";
+import { MessageCircle } from "lucide-react";
+import { useParams } from "@tanstack/react-router";
 import { MotorcycleCard } from "./home";
 import { InterestForm } from "../components/interest-form";
 import { Card } from "../components/ui/card";
@@ -16,12 +16,11 @@ export function SellerPage() {
     queryFn: async () => (await api.get<SellerCatalog>(`/public/sellers/${encodeURIComponent(slug)}`)).data.seller,
   });
   if (query.isLoading) return <div className="page-wrap py-24 text-center text-sm text-muted">Carregando catálogo...</div>;
-  if (query.isError || !query.data) return <div className="page-wrap py-24 text-center"><p className="text-lg font-bold">Este catálogo não está disponível.</p><Link className="mt-5 inline-block text-sm font-bold text-pine underline" to="/">Voltar ao início</Link></div>;
+  if (query.isError || !query.data) return <div className="page-wrap py-24 text-center"><p className="text-lg font-bold">Este catálogo não está disponível.</p></div>;
   const seller = query.data;
   document.title = `Catálogo de ${seller.name} | Independência Motos`;
   return (
     <div className="page-wrap py-12 sm:py-16">
-      <Link to="/" className="inline-flex items-center gap-2 text-sm font-semibold text-muted hover:text-ink"><ArrowLeft size={16} /> Voltar ao início</Link>
       <section className="mt-8 grid gap-8 rounded-[2rem] bg-ink p-7 text-white sm:grid-cols-[1fr_.8fr] sm:p-10">
         <div className="flex items-center gap-5">
           {seller.photoUrl ? <img className="h-20 w-20 rounded-3xl object-cover" src={seller.photoUrl} alt="" /> : <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-lime text-3xl font-black text-pine">{seller.name.slice(0, 1)}</div>}

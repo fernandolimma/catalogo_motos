@@ -12,6 +12,7 @@ import { adminRoutes } from "./routes/admin";
 import { authRoutes } from "./routes/auth";
 import { crmRoutes } from "./routes/crm";
 import { publicRoutes } from "./routes/public";
+import { whatsappRoutes } from "./routes/whatsapp";
 
 export async function buildApp() {
   if (process.env.NODE_ENV === "production" && (process.env.JWT_SECRET?.length ?? 0) < 32) {
@@ -67,6 +68,7 @@ export async function buildApp() {
         { name: "public", description: "Catálogo e captação de leads" },
         { name: "crm", description: "Gestão comercial" },
         { name: "inventory", description: "Estoque e vendedores" },
+        { name: "whatsapp", description: "Atendimento WhatsApp via Evolution API" },
       ],
     },
   });
@@ -80,11 +82,23 @@ export async function buildApp() {
         details: error.issues.map(({ path, message }) => ({ path: path.join("."), message })),
       });
     }
+    if (error instanceof Error && error.name === "EvolutionError" && "status" in error && typeof error.status === "number") {
+      return reply.code(error.status).send({
+        error: "whatsapp_integration_error",
+        message: error.message,
+      });
+    }
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "FST_ERR_VALIDATION") {
+      return reply.code(400).send({ error: "validation_error", message: "Confira os campos informados." });
+    }
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "FST_ERR_CTP_BODY_TOO_LARGE") {
+      return reply.code(413).send({ error: "payload_too_large", message: "O arquivo enviado excede o limite permitido." });
+    }
     request.log.error({ err: error }, "Request failed");
     return reply.code(500).send({ error: "internal_error", message: "Não foi possível concluir a solicitação." });
   });
 
-  app.get("/health", async (_request, reply) => {
+  app.get("/health", { config: { rateLimit: false } }, async (_request, reply) => {
     await prisma.$queryRaw`SELECT 1`;
     return reply.send({ status: "ok" });
   });
@@ -94,6 +108,7 @@ export async function buildApp() {
     await api.register(publicRoutes, { prefix: "/public" });
     await api.register(crmRoutes);
     await api.register(adminRoutes);
+    await api.register(whatsappRoutes);
   }, { prefix: "/api/v1" });
 
   return app;

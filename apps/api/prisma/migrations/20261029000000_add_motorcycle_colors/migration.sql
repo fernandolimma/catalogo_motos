@@ -1,0 +1,2 @@
+ALTER TABLE "Motorcycle"
+ADD COLUMN "colors" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];

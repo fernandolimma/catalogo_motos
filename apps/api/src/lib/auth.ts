@@ -17,12 +17,13 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
   }
   const active = await prisma.user.findFirst({
     where: { id: request.user.sub, isActive: true },
-    select: { id: true },
+    select: { id: true, role: true, authVersion: true },
   });
-  if (!active) {
+  if (!active || active.authVersion !== (request.user.ver ?? 0)) {
     reply.clearCookie("catalogo_session", { path: "/" });
     return reply.code(401).send({ error: "unauthorized", message: "Sessão inválida." });
   }
+  request.user.role = active.role;
 }
 
 export function allowRoles(...roles: UserRole[]): preHandlerHookHandler {

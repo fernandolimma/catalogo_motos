@@ -31,7 +31,7 @@ function MotorcycleCard({ motorcycle, sellerSlug }: { motorcycle: Motorcycle; se
             <ArrowUpRight className="mt-1 shrink-0 text-muted transition-transform group-hover:-translate-y-1 group-hover:translate-x-1" size={18} />
           </div>
           <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted">
-            <span>{motorcycle.year}{motorcycle.modelYear && motorcycle.modelYear !== motorcycle.year ? `/${motorcycle.modelYear}` : ""}</span>
+            <span>{motorcycle.year}{motorcycle.modelYear && String(motorcycle.modelYear) !== motorcycle.year ? `/${motorcycle.modelYear}` : ""}</span>
             {motorcycle.displacementCc && <><span>·</span><span>{motorcycle.displacementCc} cc</span></>}
             {motorcycle.mileageKm !== null && motorcycle.mileageKm !== undefined && <><span>·</span><span>{new Intl.NumberFormat("pt-BR").format(motorcycle.mileageKm)} km</span></>}
           </div>

@@ -43,6 +43,7 @@ O acesso automatizado à referência pública visual apresentou somente a tela d
 
    - Catálogo: <http://localhost:8080>
    - Login/CRM: <http://localhost:8080/login>
+   - Gestão de contas (administrador): <http://localhost:8080/admin/usuarios>
    - API e Swagger: <http://localhost:3001/docs>
    - Health check: <http://localhost:3001/health>
 
@@ -55,7 +56,9 @@ Para desligar sem apagar os dados: `docker compose down`. **Não** use `docker c
 1. Copie `.env.example` para `.env`, ajuste `DATABASE_URL` para seu PostgreSQL local e configure `JWT_SECRET`, `ADMIN_EMAIL` e `ADMIN_PASSWORD`.
 2. Instale e gere o cliente Prisma:
 
-   ```powershell
+   ```
+
+   Para desenvolver a API fora do Docker com WhatsApp ativo, deixe os serviços Evolution rodando por Compose e use `EVOLUTION_API_URL=http://localhost:8081` no `.env`.powershell
    npm install
    npm run db:generate
    npm run db:migrate -w @catalogo/api
@@ -85,7 +88,7 @@ Para desligar sem apagar os dados: `docker compose down`. **Não** use `docker c
 | `COOKIE_SECURE` | Defina `true` em HTTPS. Em desenvolvimento local, `false`. |
 | `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Credenciais do administrador criado pelo seed. A senha precisa de pelo menos 12 caracteres. O seed atualiza o usuário para refletir essas variáveis. |
 | `SEED_DEMO_DATA` | `true` cria uma única motocicleta DEMO não publicada e indisponível; padrão `false`. |
-| `WHATSAPP_PROVIDER`, `EVOLUTION_API_URL`, `EVOLUTION_API_KEY`, `EVOLUTION_INSTANCE`, `EVOLUTION_WEBHOOK_SECRET` | Configuração da integração Evolution API para WhatsApp. O código atual define o adapter e as variáveis sem executar disparos reais em produção. |
+| `WHATSAPP_PROVIDER`, `EVOLUTION_API_URL`, `EVOLUTION_API_KEY`, `EVOLUTION_INSTANCE`, `EVOLUTION_WEBHOOK_SECRET`, `EVOLUTION_POSTGRES_PASSWORD` | API, instância, autenticação do webhook e banco isolado da Evolution API. Use segredos aleatórios diferentes; no Docker, a URL interna padrão é `http://evolution:8080`. |
 | `EMAIL_PROVIDER`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | Configuração do envio de e-mails via SMTP. O adaptador está preparado, mas o disparo real é bloqueado até decisão de produção. |
 | `STORAGE_PROVIDER`, `S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | Preparação para armazenamento de mídia/imagens. Ainda não está habilitado em produção. |
 
@@ -98,18 +101,23 @@ O arquivo `.env.example` contém apenas valores demonstrativos. Não o use como 
 - Catálogo público paginado com busca textual, marca e faixa de preço suportadas pela API.
 - Detalhe por slug, galeria cadastrada, ficha técnica, preço e dados do vendedor principal.
 - Catálogo público individual por vendedor e identificação de vendedor/moto no formulário.
-- Formulário valida nome, telefone, e-mail opcional, mensagem, horário e consentimento; registra página/UTM, consentimento e atividade.
+- Formulário valida nome, telefone, e-mail obrigatório, mensagem, horário e consentimento; registra página/UTM, consentimento e atividade.
 - Telefones são normalizados e únicos. Contatos repetidos atualizam campos não vazios e registram nova atividade/interesse sem duplicar o lead.
 - Leads não são criados para motos não publicadas ou indisponíveis. Rate limits públicos protegem login e captação.
 
 ### CRM e estoque
 
 - Login com cookie JWT `HttpOnly`, `SameSite=Strict`, senha bcrypt e bloqueio temporário após tentativas inválidas.
+- Administração exclusiva para ADMIN em `/admin/usuarios`: criar contas, definir perfis, vincular vendedores, redefinir senhas e bloquear/reativar acessos; mudanças de senha, perfil ou status revogam tokens anteriores.
+- Tela `/admin/configuracoes` exclusiva para ADMIN cadastrar opções de grupo, modelo, categoria, ano (inclusive formatos como `26/27`), versão e origem de leads.
+- Cadastro manual de leads para ADMIN e SELLER em `/admin/leads/cadastrar`, vinculado ao vendedor responsável e a uma origem configurada; leads entram no funil na etapa inicial.
+- Painel administrativo com barra lateral responsiva para navegar entre dashboard, funil Kanban, estoque e contas; opções de gestão aparecem conforme o perfil autenticado.
 - Perfis iniciais e restrição de vendedor aos próprios leads no backend.
 - Lista paginada de leads, busca, filtro de etapa, ficha e histórico; anotações e atualização auditada do funil.
+- Tela Kanban dedicada para acompanhar leads em todas as etapas, pesquisar contatos e mover cartões por arrastar/soltar ou seletor de etapa.
 - Indicadores reais por etapa e taxa de conversão (vendas concluídas / todos os leads).
 - Relatórios filtráveis por data com recebimento diário, distribuição por etapa/origem/vendedor, conversão dos leads do período, vendas e receita por data de fechamento; exportação agregada em CSV.
-- Tela administrativa para cadastrar motos e vendedores, publicar/recolher anúncios e mudar o estado de estoque; API autenticada também permite editar motos.
+- Telas administrativas separadas para cadastrar motocicletas, gerenciar a lista de motocicletas cadastradas (incluindo publicação e estado do estoque) e cadastrar/editar vendedores. O formulário usa grupos, modelos, categorias, anos e versões cadastrados em Configurações, além de várias cores e disponibilidade para todos os vendedores.
 - API autenticada para cadastrar/editar motos e vendedores.
 - Swagger/OpenAPI em `/docs`.
 
@@ -132,8 +140,19 @@ Prefixo: `/api/v1`.
 | `PATCH` | `/crm/leads/:id/stage` | Sessão; alteração auditada |
 | `GET` | `/crm/overview` | Sessão; escopo de vendedor aplicado |
 | `GET` | `/crm/reports?from=YYYY-MM-DD&to=YYYY-MM-DD` | Sessão; relatório limitado ao escopo do usuário e a períodos de até 365 dias |
+| `GET` | `/whatsapp/status`, `/whatsapp/chats?q=termo&filter=all\|unread\|starred\|archived` | Administrador, supervisor, gerente ou vendedor; conversas no escopo do lead |
+| `GET` | `/whatsapp/leads/:leadId/chat` | Sessão autorizada; localizar conversa pelo Lead e telefone |
+| `GET/POST` | `/whatsapp/chats/:id/messages` | Sessão autorizada; histórico e envio de texto |
+| `POST` | `/whatsapp/chats/:id/media` | Sessão autorizada; envio de imagem, vídeo, áudio e documentos até 8 MB |
+| `GET` | `/whatsapp/chats/:id/messages/:messageId/media` | Sessão autorizada; carregar mídia recebida sob demanda |
+| `POST` | `/whatsapp/chats/:id/messages/:messageId/reaction`, `/whatsapp/chats/:id/messages/:messageId/forward` | Sessão autorizada; reagir e reencaminhar |
+| `PATCH/DELETE` | `/whatsapp/chats/:id/messages/:messageId` | Sessão autorizada; editar texto enviado e apagar mensagem para todos |
+| `PATCH` | `/whatsapp/chats/:id/read`, `/whatsapp/chats/:id/preferences` | Sessão autorizada; marcar como lida e organizar conversa |
+| `POST` | `/whatsapp/connect` | Exclusivo para administrador |
+| `POST` | `/whatsapp/webhook` | Evolution API; segredo compartilhado no cabeçalho `x-evolution-webhook-secret` |
 | `GET/POST/PATCH` | `/motorcycles`, `/motorcycles/:id` | Administrador/supervisor/gerente |
-| `GET/POST` | `/sellers` | Administrador/supervisor/gerente |
+| `GET/POST/PATCH` | `/sellers`, `/sellers/:id` | Administrador/supervisor/gerente |
+| `GET/POST/PATCH` | `/users`, `/users/:id` | Exclusivo para administrador |
 
 Entradas são validadas no backend. A API retorna erro genérico sem detalhes internos e não inclui hashes de senha em respostas.
 
@@ -143,7 +162,14 @@ O seed usa `ADMIN_EMAIL`, `ADMIN_NAME` e `ADMIN_PASSWORD` e faz upsert idempoten
 
 ## Evolution API e WhatsApp
 
-As variáveis de configuração estão reservadas, mas a integração em execução ainda não está implementada: não há provisionamento/QR, caixa de entrada, envio, tratamento de eventos, autenticação de webhooks, fila ou reprocessamento. A aplicação não depende de WhatsApp para persistir e organizar leads. Configure a integração apenas após validar a versão Evolution implantada, seus endpoints e o mecanismo de autenticação do webhook.
+O Docker Compose executa a Evolution API `v2.3.7` com banco PostgreSQL, Redis e volume persistente para a sessão do WhatsApp. O serviço API da loja acessa a Evolution pela rede interna do Docker; a porta `8081` fica vinculada apenas a `127.0.0.1` para diagnóstico local. A chave da Evolution e o segredo do webhook nunca são enviados ao navegador.
+
+1. Gere valores aleatórios diferentes para `EVOLUTION_API_KEY`, `EVOLUTION_WEBHOOK_SECRET` e `EVOLUTION_POSTGRES_PASSWORD` no `.env`.
+2. Suba os serviços com `docker compose up --build -d`.
+3. Entre no CRM como administrador, abra **WhatsApp** e selecione **Conectar WhatsApp**.
+4. No telefone, acesse **Aparelhos conectados** e leia o QR Code. A sessão e as conversas ficam persistidas nos volumes Docker.
+
+A Evolution salva mensagens e entrega eventos ao webhook autenticado do CRM. Administradores, supervisores e gerentes visualizam todas as conversas; vendedores visualizam as conversas associadas aos leads atribuídos a eles. A caixa de entrada permite pesquisar contatos e conteúdo das mensagens, filtrar conversas não lidas, favoritas ou arquivadas, além de fixar, favoritar, silenciar e arquivar conversas. Ao abrir uma conversa, as mensagens recebidas são marcadas como lidas. As preferências ficam salvas no banco do CRM. O chat suporta texto e, nesta segunda etapa, envio de imagens, vídeos, áudios e documentos de até 8 MB, visualização sob demanda de mídia recebida, respostas citadas, reações, edição de texto enviado, remoção para todos e reencaminhamento para outra conversa. O reencaminhamento é feito como novo envio, pois a Evolution não fornece uma operação nativa de encaminhamento. Gerenciamento de contatos e grupos permanece para a etapa seguinte.
 
 ## Backup e restauração
 
@@ -185,8 +211,8 @@ Teste a persistência de ponta a ponta com PostgreSQL disponível (Docker Compos
 
 ## Limitações conhecidas — não declarar como concluídas
 
-- O escopo completo do prompt ainda não foi concluído. Não há recuperação/renovação de sessão, administração de usuários e permissões configuráveis, sessões revogáveis, workflow de tarefas/agendamentos, distribuição equilibrada, Kanban drag-and-drop ou regras de transição.
-- Não há inbox/integração Evolution API, notificações por e-mail, automações, anexos, upload de imagens/S3 ou armazenamento de segredos externos.
+- O escopo completo do prompt ainda não foi concluído. Não há recuperação/renovação de sessão, configuração fina de permissões por ação, workflow de tarefas/agendamentos, distribuição equilibrada, Kanban drag-and-drop ou regras de transição.
+- Não há notificações por e-mail, automações, anexos, upload de imagens/S3 ou armazenamento externo de segredos.
 - Relatórios além do resumo atual, filtros avançados, CSV, exportação/exclusão formal LGPD, configurações globais e ferramentas para retenção não estão implementados.
 - Faltam edição completa de vendedores no painel, SEO dinâmico/Open Graph/sitemap/robots, testes de integração com PostgreSQL, testes E2E e teste de responsividade automatizado.
 - O aviso de privacidade é uma base textual; a loja deve revisar finalidade, contato do encarregado, retenção e direitos antes de produção.

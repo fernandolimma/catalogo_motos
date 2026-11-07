@@ -1,0 +1,2 @@
+ALTER TABLE "Motorcycle"
+ALTER COLUMN "year" TYPE TEXT USING "year"::TEXT;
