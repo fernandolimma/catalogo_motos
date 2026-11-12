@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowDown, ArrowRight, ArrowUpRight, BadgeCheck, Search, ShieldCheck, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { api } from "../lib/api";
+import { api, sellerPhotoUrl } from "../lib/api";
 import { formatBRL, type Motorcycle, type Seller } from "../lib/types";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -35,10 +35,10 @@ function MotorcycleCard({ motorcycle, sellerSlug }: { motorcycle: Motorcycle; se
             {motorcycle.displacementCc && <><span>·</span><span>{motorcycle.displacementCc} cc</span></>}
             {motorcycle.mileageKm !== null && motorcycle.mileageKm !== undefined && <><span>·</span><span>{new Intl.NumberFormat("pt-BR").format(motorcycle.mileageKm)} km</span></>}
           </div>
-          <div className="mt-5 border-t border-black/5 pt-4">
+          {motorcycle.showPriceOnCatalog !== false && <div className="mt-5 border-t border-black/5 pt-4">
             <p className="text-xs text-muted">Valor anunciado</p>
             <p className="mt-1 text-xl font-black tracking-tight">{formatBRL(motorcycle.promotionalCents ?? motorcycle.priceCents)}</p>
-          </div>
+          </div>}
         </div>
       </Link>
       <div className="px-5 pb-5">
@@ -135,7 +135,7 @@ export function HomePage() {
             {sellers.data?.map((seller) => (
               <Link key={seller.slug} to="/vendedor/$slug" params={{ slug: seller.slug }} className="group rounded-3xl bg-white p-5 shadow-sm transition hover:-translate-y-1 hover:shadow-soft">
                 <div className="flex items-center gap-4">
-                  {seller.photoUrl ? <img className="h-14 w-14 rounded-2xl object-cover" src={seller.photoUrl} alt="" /> : <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-lime text-lg font-black text-pine">{seller.name.slice(0, 1)}</div>}
+                  {seller.photoUrl ? <img className="h-14 w-14 rounded-2xl object-cover" src={sellerPhotoUrl(seller.photoUrl) ?? undefined} alt="" /> : <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-lime text-lg font-black text-pine">{seller.name.slice(0, 1)}</div>}
                   <div className="min-w-0 flex-1">
                     <p className="font-bold">{seller.name}</p>
                     <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted">{seller.bio || "Conheça as motos do catálogo e fale diretamente com o vendedor."}</p>

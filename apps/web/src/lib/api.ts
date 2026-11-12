@@ -7,6 +7,13 @@ export const api = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
+export function sellerPhotoUrl(photoUrl: string | null | undefined) {
+  if (!photoUrl) return null;
+  if (/^https?:\/\//i.test(photoUrl)) return photoUrl;
+  const baseUrl = new URL(api.defaults.baseURL ?? "/api/v1", window.location.origin);
+  return new URL(photoUrl, `${baseUrl.href.replace(/\/?$/, "/")}`).toString();
+}
+
 export function errorMessage(error: unknown) {
   if (axios.isAxiosError<{ message?: string }>(error)) {
     return error.response?.data?.message ?? "Não foi possível concluir. Tente novamente.";

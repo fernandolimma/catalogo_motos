@@ -4,7 +4,7 @@ import { useParams } from "@tanstack/react-router";
 import { MotorcycleCard } from "./home";
 import { InterestForm } from "../components/interest-form";
 import { Card } from "../components/ui/card";
-import { api } from "../lib/api";
+import { api, sellerPhotoUrl } from "../lib/api";
 import type { Motorcycle, Seller } from "../lib/types";
 
 type SellerCatalog = { seller: Seller & { motorcycles: Motorcycle[] } };
@@ -23,7 +23,7 @@ export function SellerPage() {
     <div className="page-wrap py-12 sm:py-16">
       <section className="mt-8 grid gap-8 rounded-[2rem] bg-ink p-7 text-white sm:grid-cols-[1fr_.8fr] sm:p-10">
         <div className="flex items-center gap-5">
-          {seller.photoUrl ? <img className="h-20 w-20 rounded-3xl object-cover" src={seller.photoUrl} alt="" /> : <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-lime text-3xl font-black text-pine">{seller.name.slice(0, 1)}</div>}
+          {seller.photoUrl ? <img className="h-20 w-20 rounded-3xl object-cover" src={sellerPhotoUrl(seller.photoUrl) ?? undefined} alt="" /> : <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-lime text-3xl font-black text-pine">{seller.name.slice(0, 1)}</div>}
           <div><p className="text-xs font-bold uppercase tracking-[.18em] text-lime">Seu consultor</p><h1 className="mt-2 font-display text-3xl font-black sm:text-4xl">{seller.name}</h1><p className="mt-2 max-w-lg text-sm leading-6 text-white/60">{seller.bio || "Conheça as motocicletas disponíveis e me conte o que você procura."}</p></div>
         </div>
         {seller.whatsapp && <a className="inline-flex min-h-12 items-center justify-center gap-2 self-center rounded-full bg-lime px-5 text-sm font-bold text-ink" href={`https://wa.me/${seller.whatsapp.replace(/\D/g, "")}`} target="_blank" rel="noreferrer"><MessageCircle size={17} /> Conversar no WhatsApp</a>}
@@ -38,7 +38,7 @@ export function SellerPage() {
           <p className="text-xs font-bold uppercase tracking-[.18em] text-pine">Vamos conversar</p>
           <h2 className="mt-2 text-2xl font-black">O que você está procurando?</h2>
           <p className="mb-6 mt-2 text-sm text-muted">Deixe seus dados e sua mensagem chegará à nossa equipe.</p>
-          <InterestForm sellerSlug={seller.slug} />
+          <InterestForm sellerSlug={seller.slug} sellerName={seller.name} />
         </Card>
       </section>
     </div>

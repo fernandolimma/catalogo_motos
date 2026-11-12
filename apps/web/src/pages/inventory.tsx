@@ -1,14 +1,14 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { LoaderCircle, Pencil, Plus, Save, Store, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { z } from "zod";
 import { AdminShell } from "../components/admin-shell";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
-import { api, errorMessage } from "../lib/api";
+import { api, errorMessage, sellerPhotoUrl } from "../lib/api";
 import { formatBRL } from "../lib/types";
 
 type InventoryMotorcycle = {
@@ -21,6 +21,7 @@ type InventoryMotorcycle = {
   group?: string | null;
   category?: string | null;
   priceCents: string;
+  showPriceOnCatalog: boolean;
   colors: string[];
   description?: string | null;
   imageUrl?: string | null;
@@ -51,6 +52,7 @@ const motorcycleSchema = z.object({
   group: z.string().trim().max(80),
   category: z.string().trim().max(80),
   price: z.string().regex(/^\d+(?:[,.]\d{1,2})?$/, "Use um valor como 12500,00."),
+  showPriceOnCatalog: z.boolean(),
   colors: z.array(z.string().regex(/^#[0-9a-fA-F]{6}$/))
     .max(12, "Adicione no máximo 12 cores.")
     .refine((colors) => new Set(colors).size === colors.length, "Não adicione a mesma cor mais de uma vez."),
@@ -74,6 +76,10 @@ const sellerSchema = z.object({
 });
 
 type SellerValues = z.infer<typeof sellerSchema>;
+
+const emptySellerValues: SellerValues = { name: "", email: "", whatsapp: "", bio: "" };
+const sellerPhotoMimeTypes = ["image/jpeg", "image/png", "image/webp"];
+const maxSellerPhotoSize = 1_048_576;
 
 function priceToCents(value: string) {
   const [whole = "0", fraction = ""] = value.replace(",", ".").split(".");
@@ -102,6 +108,13 @@ export function InventoryPage() {
   const cache = useQueryClient();
   const [editingSeller, setEditingSeller] = useState<string | null>(null);
   const [colorToAdd, setColorToAdd] = useState("#000000");
+  const [sellerPhoto, setSellerPhoto] = useState<File | null>(null);
+  const [sellerPhotoPreview, setSellerPhotoPreview] = useState<string | null>(null);
+  const [removeSellerPhoto, setRemoveSellerPhoto] = useState(false);
+  const [sellerPhotoError, setSellerPhotoError] = useState<string | null>(null);
+  const [sellerFormError, setSellerFormError] = useState<string | null>(null);
+  const [sellerFormSuccess, setSellerFormSuccess] = useState<string | null>(null);
+  const sellerPhotoInput = useRef<HTMLInputElement>(null);
   const auth = useQuery({ queryKey: ["session"], queryFn: async () => (await api.get("/auth/me")).data });
   useEffect(() => {
     if (auth.isError) void navigate({ to: "/login" });
@@ -117,6 +130,16 @@ export function InventoryPage() {
     queryFn: async () => (await api.get<{ items: InventorySeller[] }>("/sellers")).data.items,
     enabled: auth.isSuccess,
   });
+  const currentEditingSeller = sellers.data?.find((seller) => seller.id === editingSeller);
+  useEffect(() => {
+    if (!sellerPhoto) {
+      setSellerPhotoPreview(null);
+      return;
+    }
+    const preview = URL.createObjectURL(sellerPhoto);
+    setSellerPhotoPreview(preview);
+    return () => URL.revokeObjectURL(preview);
+  }, [sellerPhoto]);
   const motorcycleOptions = useQuery({
     queryKey: ["motorcycle-options"],
     queryFn: async () => (await api.get<{ items: MotorcycleOption[] }>("/motorcycle-options")).data.items,
@@ -129,7 +152,7 @@ export function InventoryPage() {
   const versions = motorcycleOptions.data?.filter((option) => option.type === "VERSION") ?? [];
   const motorcycleForm = useForm<MotorcycleValues>({
     resolver: zodResolver(motorcycleSchema),
-    defaultValues: { brand: "", model: "", version: "", year: "", group: "", category: "", price: "", colors: [], description: "", imageUrl: "", primarySellerId: "", publish: false, availableToAllSellers: false },
+    defaultValues: { brand: "", model: "", version: "", year: "", group: "", category: "", price: "", showPriceOnCatalog: true, colors: [], description: "", imageUrl: "", primarySellerId: "", publish: false, availableToAllSellers: false },
   });
   const motorcycleColors = useWatch({ control: motorcycleForm.control, name: "colors" }) ?? [];
   useEffect(() => {
@@ -144,6 +167,7 @@ export function InventoryPage() {
       group: motorcycle.group ?? "",
       category: motorcycle.category ?? "",
       price: priceFromCents(motorcycle.priceCents),
+      showPriceOnCatalog: motorcycle.showPriceOnCatalog,
       colors: motorcycle.colors ?? [],
       description: motorcycle.description ?? "",
       imageUrl: motorcycle.imageUrl ?? "",
@@ -154,7 +178,7 @@ export function InventoryPage() {
   }, [editingMotorcycle, motorcycles.data, motorcycleForm]);
   const sellerForm = useForm<SellerValues>({
     resolver: zodResolver(sellerSchema),
-    defaultValues: { name: "", email: "", whatsapp: "", bio: "" },
+    defaultValues: emptySellerValues,
   });
 
   const createMotorcycle = useMutation({
@@ -166,6 +190,7 @@ export function InventoryPage() {
       group: values.group || undefined,
       category: values.category || undefined,
       priceCents: priceToCents(values.price),
+      showPriceOnCatalog: values.showPriceOnCatalog,
       colors: values.colors,
       description: values.description || undefined,
       imageUrl: values.imageUrl || undefined,
@@ -175,22 +200,18 @@ export function InventoryPage() {
       status: "AVAILABLE",
     }),
     onSuccess: async () => {
-      motorcycleForm.reset({ brand: "", model: "", version: "", year: "", group: "", category: "", price: "", colors: [], description: "", imageUrl: "", primarySellerId: "", publish: false, availableToAllSellers: false });
+      motorcycleForm.reset({ brand: "", model: "", version: "", year: "", group: "", category: "", price: "", showPriceOnCatalog: true, colors: [], description: "", imageUrl: "", primarySellerId: "", publish: false, availableToAllSellers: false });
       await Promise.all([cache.invalidateQueries({ queryKey: ["inventory-motorcycles"] }), cache.invalidateQueries({ queryKey: ["catalog"] })]);
       await navigate({ to: "/admin/estoque" });
     },
   });
   const createSeller = useMutation({
-    mutationFn: async (values: SellerValues) => api.post("/sellers", {
+    mutationFn: async (values: SellerValues) => api.post<{ seller: InventorySeller }>("/sellers", {
       name: values.name,
       email: values.email || undefined,
       whatsapp: values.whatsapp || undefined,
       bio: values.bio || undefined,
     }),
-    onSuccess: async () => {
-      sellerForm.reset();
-      await cache.invalidateQueries({ queryKey: ["inventory-sellers"] });
-    },
   });
   const updateMotorcycle = useMutation({
     mutationFn: async ({ id, values }: { id: string; values: MotorcycleValues }) => api.patch(`/motorcycles/${id}`, {
@@ -201,6 +222,7 @@ export function InventoryPage() {
       group: values.group || null,
       category: values.category || null,
       priceCents: priceToCents(values.price),
+      showPriceOnCatalog: values.showPriceOnCatalog,
       colors: values.colors,
       description: values.description || null,
       imageUrl: values.imageUrl || null,
@@ -209,7 +231,7 @@ export function InventoryPage() {
       availableToAllSellers: values.availableToAllSellers,
     }),
     onSuccess: async () => {
-      motorcycleForm.reset({ brand: "", model: "", version: "", year: "", group: "", category: "", price: "", colors: [], description: "", imageUrl: "", primarySellerId: "", publish: false, availableToAllSellers: false });
+      motorcycleForm.reset({ brand: "", model: "", version: "", year: "", group: "", category: "", price: "", showPriceOnCatalog: true, colors: [], description: "", imageUrl: "", primarySellerId: "", publish: false, availableToAllSellers: false });
       await Promise.all([cache.invalidateQueries({ queryKey: ["inventory-motorcycles"] }), cache.invalidateQueries({ queryKey: ["catalog"] })]);
       await navigate({ to: "/admin/estoque" });
     },
@@ -221,16 +243,31 @@ export function InventoryPage() {
       whatsapp: values.whatsapp || null,
       bio: values.bio || null,
     }),
-    onSuccess: async () => {
-      setEditingSeller(null);
-      sellerForm.reset();
-      await Promise.all([
-        cache.invalidateQueries({ queryKey: ["inventory-sellers"] }),
-        cache.invalidateQueries({ queryKey: ["inventory-motorcycles"] }),
-        cache.invalidateQueries({ queryKey: ["catalog"] }),
-      ]);
+  });
+  const uploadSellerPhoto = useMutation({
+    mutationFn: async ({ id, photo }: { id: string; photo: File }) => {
+      const body = new FormData();
+      body.append("photo", photo);
+      return api.post(`/sellers/${id}/photo`, body, { headers: { "Content-Type": "multipart/form-data" } });
     },
   });
+  const deleteSellerPhoto = useMutation({
+    mutationFn: async (id: string) => api.delete(`/sellers/${id}/photo`),
+  });
+  const clearSellerForm = () => {
+    setEditingSeller(null);
+    setSellerPhoto(null);
+    setRemoveSellerPhoto(false);
+    setSellerPhotoError(null);
+    setSellerFormError(null);
+    setSellerFormSuccess(null);
+    if (sellerPhotoInput.current) sellerPhotoInput.current.value = "";
+    sellerForm.reset({ ...emptySellerValues });
+    createSeller.reset();
+    updateSeller.reset();
+    uploadSellerPhoto.reset();
+    deleteSellerPhoto.reset();
+  };
   const updateStock = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: string }) => api.patch(`/motorcycles/${id}`, { status }),
     onSuccess: async () => {
@@ -243,6 +280,44 @@ export function InventoryPage() {
       await Promise.all([cache.invalidateQueries({ queryKey: ["inventory-motorcycles"] }), cache.invalidateQueries({ queryKey: ["catalog"] })]);
     },
   });
+  const submitSeller = async (values: SellerValues) => {
+    setSellerFormError(null);
+    setSellerFormSuccess(null);
+    createSeller.reset();
+    updateSeller.reset();
+    uploadSellerPhoto.reset();
+    deleteSellerPhoto.reset();
+    try {
+      const wasEditing = Boolean(editingSeller);
+      let sellerId = editingSeller;
+      if (sellerId) {
+        await updateSeller.mutateAsync({ id: sellerId, values });
+      } else {
+        const { data } = await createSeller.mutateAsync(values);
+        sellerId = data.seller.id;
+        setEditingSeller(sellerId);
+        await cache.invalidateQueries({ queryKey: ["inventory-sellers"] });
+      }
+
+      if (removeSellerPhoto && currentEditingSeller?.photoUrl) {
+        await deleteSellerPhoto.mutateAsync(sellerId);
+      } else if (sellerPhoto) {
+        await uploadSellerPhoto.mutateAsync({ id: sellerId, photo: sellerPhoto });
+      }
+
+      clearSellerForm();
+      setSellerFormSuccess(wasEditing ? "Dados do vendedor atualizados." : "Vendedor cadastrado.");
+      await Promise.all([
+        cache.invalidateQueries({ queryKey: ["inventory-sellers"] }),
+        cache.invalidateQueries({ queryKey: ["inventory-motorcycles"] }),
+        cache.invalidateQueries({ queryKey: ["catalog"] }),
+        cache.invalidateQueries({ queryKey: ["public-sellers"] }),
+        cache.invalidateQueries({ queryKey: ["seller-catalog"] }),
+      ]);
+    } catch (error) {
+      setSellerFormError(errorMessage(error));
+    }
+  };
 
   if (auth.isLoading || !auth.isSuccess) return <main className="flex min-h-screen items-center justify-center bg-paper text-sm text-muted">Verificando sessão...</main>;
   const currentUser = (auth.data as { user?: { name?: string; role?: string } }).user;
@@ -304,6 +379,7 @@ export function InventoryPage() {
                 </select>
               </label>
               <label className="field-label">Preço (R$)<input className="field-input" inputMode="decimal" placeholder="12500,00" {...motorcycleForm.register("price")} />{motorcycleForm.formState.errors.price && <span className="field-error">{motorcycleForm.formState.errors.price.message}</span>}</label>
+              <label className="flex items-center gap-2 text-xs font-semibold text-ink/70 sm:col-span-2"><input type="checkbox" className="accent-pine" {...motorcycleForm.register("showPriceOnCatalog")} />Exibir preço nos cards do catálogo</label>
               <fieldset className="rounded-xl border border-black/10 p-4 sm:col-span-2">
                 <legend className="px-1 text-xs font-bold">Cores disponíveis</legend>
                 <div className="grid gap-5 sm:grid-cols-2">
@@ -342,7 +418,7 @@ export function InventoryPage() {
               {(createMotorcycle.isError || updateMotorcycle.isError) && <p className="field-error sm:col-span-2" role="alert">{errorMessage(createMotorcycle.error ?? updateMotorcycle.error)}</p>}
               <Button className="w-full sm:col-span-2" type="submit" disabled={createMotorcycle.isPending || updateMotorcycle.isPending}>{createMotorcycle.isPending || updateMotorcycle.isPending ? <LoaderCircle size={16} className="animate-spin" /> : editingMotorcycle ? <Save size={16} /> : <Plus size={16} />}{editingMotorcycle ? "Salvar alterações" : "Cadastrar motocicleta"}</Button>
               {editingMotorcycle && <Button className="w-full sm:col-span-2" variant="outline" type="button" onClick={() => {
-                motorcycleForm.reset({ brand: "", model: "", version: "", year: "", group: "", category: "", price: "", colors: [], description: "", imageUrl: "", primarySellerId: "", publish: false, availableToAllSellers: false });
+                motorcycleForm.reset({ brand: "", model: "", version: "", year: "", group: "", category: "", price: "", showPriceOnCatalog: true, colors: [], description: "", imageUrl: "", primarySellerId: "", publish: false, availableToAllSellers: false });
                 updateMotorcycle.reset();
                 void navigate({ to: "/admin/estoque" });
               }}><X size={16} />Cancelar edição</Button>}
@@ -353,22 +429,70 @@ export function InventoryPage() {
         {isSellerView && <div className="mt-8 max-w-2xl">
           <Card className="rounded-2xl p-5 shadow-none sm:p-7">
             <div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#ebefe8] text-pine">{editingSeller ? <Pencil size={18} /> : <Store size={18} />}</span><div><h2 className="font-bold">{editingSeller ? "Editar vendedor" : "Adicionar vendedor"}</h2><p className="mt-1 text-xs text-muted">{editingSeller ? "Atualize os dados públicos do vendedor." : "Cria uma página pública para compartilhar."}</p></div></div>
-            <form className="mt-6 space-y-4" onSubmit={sellerForm.handleSubmit((values) => {
-              if (editingSeller) updateSeller.mutate({ id: editingSeller, values });
-              else createSeller.mutate(values);
-            })}>
+            <form className="mt-6 space-y-4" onSubmit={sellerForm.handleSubmit(submitSeller)}>
               <label className="field-label">Nome<input className="field-input" {...sellerForm.register("name")} />{sellerForm.formState.errors.name && <span className="field-error">{sellerForm.formState.errors.name.message}</span>}</label>
               <label className="field-label">E-mail<input className="field-input" type="email" {...sellerForm.register("email")} />{sellerForm.formState.errors.email && <span className="field-error">{sellerForm.formState.errors.email.message}</span>}</label>
               <label className="field-label">WhatsApp <span className="font-normal text-muted">(com código do país)</span><input className="field-input" inputMode="tel" {...sellerForm.register("whatsapp")} /></label>
               <label className="field-label">Apresentação<input className="field-input" {...sellerForm.register("bio")} /></label>
-              {(createSeller.isError || updateSeller.isError) && <p className="field-error" role="alert">{errorMessage(createSeller.error ?? updateSeller.error)}</p>}
-              {createSeller.isSuccess && <p className="text-xs font-semibold text-pine" role="status">Vendedor cadastrado.</p>}
-              {updateSeller.isSuccess && <p className="text-xs font-semibold text-pine" role="status">Dados do vendedor atualizados.</p>}
-              <Button className="w-full" variant="dark" type="submit" disabled={createSeller.isPending || updateSeller.isPending}>{createSeller.isPending || updateSeller.isPending ? <LoaderCircle size={16} className="animate-spin" /> : editingSeller ? <Save size={16} /> : <Plus size={16} />}{editingSeller ? "Salvar alterações" : "Adicionar vendedor"}</Button>
+              <fieldset className="space-y-3 rounded-xl border border-black/10 p-4">
+                <legend className="px-1 text-xs font-bold">Imagens do Perfil</legend>
+                <label className="field-label" htmlFor="seller-profile-photo">Foto de Perfil</label>
+                <input
+                  id="seller-profile-photo"
+                  ref={sellerPhotoInput}
+                  className="field-input file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-paper file:px-2 file:py-1"
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.[0] ?? null;
+                    event.currentTarget.value = "";
+                    setSellerPhotoError(null);
+                    setSellerFormError(null);
+                    setSellerFormSuccess(null);
+                    setSellerPhoto(null);
+                    if (!file) return;
+                    if (!sellerPhotoMimeTypes.includes(file.type)) {
+                      setSellerPhotoError("Envie uma imagem JPG, PNG ou WebP.");
+                      return;
+                    }
+                    if (file.size > maxSellerPhotoSize) {
+                      setSellerPhotoError("A foto deve ter no máximo 1 MB.");
+                      return;
+                    }
+                    setSellerPhoto(file);
+                    setRemoveSellerPhoto(false);
+                  }}
+                />
+                <p className="text-xs text-muted">Formatos suportados: JPG, PNG, WebP. Máximo 1 MB.</p>
+                {(sellerPhotoPreview || (!removeSellerPhoto && currentEditingSeller?.photoUrl)) && <div className="flex items-center gap-3 rounded-xl border border-black/10 p-3">
+                  <img
+                    className="h-14 w-14 rounded-full object-cover"
+                    src={sellerPhotoPreview ?? sellerPhotoUrl(currentEditingSeller?.photoUrl) ?? ""}
+                    alt={sellerPhoto ? "Pré-visualização da foto de perfil" : `Foto de perfil de ${currentEditingSeller?.name ?? ""}`}
+                  />
+                  {currentEditingSeller?.photoUrl && <label className="flex cursor-pointer items-center gap-2 text-xs text-ink/70">
+                    <input
+                      type="checkbox"
+                      className="accent-pine"
+                      checked={removeSellerPhoto}
+                      onChange={(event) => {
+                        setRemoveSellerPhoto(event.target.checked);
+                        if (event.target.checked) setSellerPhoto(null);
+                      }}
+                    />
+                    Remover
+                  </label>}
+                </div>}
+                {sellerPhotoError && <p className="field-error" role="alert">{sellerPhotoError}</p>}
+              </fieldset>
+              {sellerFormError && <p className="field-error" role="alert">{sellerFormError}</p>}
+              {sellerFormSuccess && <p className="text-xs font-semibold text-pine" role="status">{sellerFormSuccess}</p>}
+              <Button className="w-full" variant="dark" type="submit" disabled={createSeller.isPending || updateSeller.isPending || uploadSellerPhoto.isPending || deleteSellerPhoto.isPending}>
+                {createSeller.isPending || updateSeller.isPending || uploadSellerPhoto.isPending || deleteSellerPhoto.isPending ? <LoaderCircle size={16} className="animate-spin" /> : editingSeller ? <Save size={16} /> : <Plus size={16} />}
+                {uploadSellerPhoto.isPending ? "Enviando foto..." : deleteSellerPhoto.isPending ? "Removendo foto..." : editingSeller ? "Salvar alterações" : "Adicionar vendedor"}
+              </Button>
               {editingSeller && <Button className="w-full" variant="outline" type="button" onClick={() => {
-                setEditingSeller(null);
-                sellerForm.reset();
-                updateSeller.reset();
+                clearSellerForm();
               }}><X size={16} />Cancelar edição</Button>}
             </form>
             {sellers.data && sellers.data.length > 0 && <div className="mt-6 border-t border-black/5 pt-5">
@@ -377,7 +501,13 @@ export function InventoryPage() {
                 {sellers.data.map((seller) => <li key={seller.id} className="flex items-center justify-between gap-2 rounded-xl bg-paper p-3">
                   <div className="min-w-0"><p className="truncate text-xs font-bold">{seller.name}</p><p className="truncate text-[10px] text-muted">{seller.email || seller.whatsapp || seller.slug}</p></div>
                   <button className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1.5 text-[10px] font-bold text-pine hover:bg-white" type="button" onClick={() => {
+                    if (sellerPhotoInput.current) sellerPhotoInput.current.value = "";
                     setEditingSeller(seller.id);
+                    setSellerPhoto(null);
+                    setRemoveSellerPhoto(false);
+                    setSellerPhotoError(null);
+                    setSellerFormError(null);
+                    setSellerFormSuccess(null);
                     sellerForm.reset({
                       name: seller.name,
                       email: seller.email ?? "",
@@ -385,6 +515,8 @@ export function InventoryPage() {
                       bio: seller.bio ?? "",
                     });
                     updateSeller.reset();
+                    uploadSellerPhoto.reset();
+                    deleteSellerPhoto.reset();
                   }}><Pencil size={13} />Editar</button>
                 </li>)}
               </ul>

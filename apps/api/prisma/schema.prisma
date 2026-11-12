@@ -116,6 +116,7 @@ model Motorcycle {
   transmission     String?
   priceCents       BigInt
   promotionalCents BigInt?
+  showPriceOnCatalog Boolean          @default(true)
   description      String?
   specifications   Json              @default("{}")
   imageUrl         String?

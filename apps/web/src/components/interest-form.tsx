@@ -2,6 +2,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { CheckCircle2, LoaderCircle, Send } from "lucide-react";
 import { Controller, useForm } from "react-hook-form";
+import { useEffect } from "react";
 import { z } from "zod";
 import { api, errorMessage } from "../lib/api";
 import { getCampaignParams } from "../lib/campaign";
@@ -20,7 +21,7 @@ const interestSchema = z.object({
 
 type InterestValues = z.infer<typeof interestSchema>;
 
-type InterestFormProps = { motorcycleSlug?: string; sellerSlug?: string; compact?: boolean };
+type InterestFormProps = { motorcycleSlug?: string; sellerSlug?: string; sellerName?: string; compact?: boolean };
 
 function formatPhone(value: string) {
   const digits = value.replace(/\D/g, "").slice(0, 11);
@@ -29,7 +30,7 @@ function formatPhone(value: string) {
   return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
 }
 
-export function InterestForm({ motorcycleSlug, sellerSlug, compact = false }: InterestFormProps) {
+export function InterestForm({ motorcycleSlug, sellerSlug, sellerName, compact = false }: InterestFormProps) {
   const sellers = useQuery({
     queryKey: ["public-sellers"],
     queryFn: async () => (await api.get<{ items: Seller[] }>("/public/sellers")).data.items,
@@ -38,10 +39,17 @@ export function InterestForm({ motorcycleSlug, sellerSlug, compact = false }: In
     resolver: zodResolver(interestSchema),
     defaultValues: { sellerSlug: sellerSlug ?? "", name: "", phone: "", email: "", message: "", bestContactTime: "", consent: false },
   });
+  useEffect(() => {
+    if (sellerSlug) form.setValue("sellerSlug", sellerSlug, { shouldValidate: true });
+  }, [form, sellerSlug]);
+  const fixedSellerName = sellerSlug
+    ? sellerName ?? sellers.data?.find((seller) => seller.slug === sellerSlug)?.name ?? sellerSlug
+    : undefined;
   const mutation = useMutation({
     mutationFn: async (values: InterestValues) => {
       const { data } = await api.post("/public/leads", {
         ...values,
+        sellerSlug: sellerSlug ?? values.sellerSlug,
         motorcycleSlug,
         sourcePage: window.location.href,
         utm: getCampaignParams(),
@@ -63,20 +71,22 @@ export function InterestForm({ motorcycleSlug, sellerSlug, compact = false }: In
   const onSubmit = form.handleSubmit((values) => mutation.mutate(values));
   return (
     <form onSubmit={(event) => {
-      if (!sellers.isSuccess || sellers.data.length === 0) {
+      if (!sellerSlug && (!sellers.isSuccess || sellers.data.length === 0)) {
         event.preventDefault();
         return;
       }
       void onSubmit(event);
     }} className="space-y-4">
       <label className="field-label">Vendedor responsável pelo atendimento
-        <select className="field-input" {...form.register("sellerSlug")} disabled={sellers.isLoading || sellers.isError || sellers.data?.length === 0}>
-          <option value="">{sellers.isLoading ? "Carregando vendedores..." : "Selecione um vendedor"}</option>
-          {sellers.data?.map((seller) => <option key={seller.slug} value={seller.slug}>{seller.name}</option>)}
-        </select>
+        {sellerSlug
+          ? <div className="field-input flex items-center" role="textbox" aria-readonly="true">{fixedSellerName}</div>
+          : <select className="field-input" {...form.register("sellerSlug")} disabled={sellers.isLoading || sellers.isError || sellers.data?.length === 0}>
+            <option value="">{sellers.isLoading ? "Carregando vendedores..." : "Selecione um vendedor"}</option>
+            {sellers.data?.map((seller) => <option key={seller.slug} value={seller.slug}>{seller.name}</option>)}
+          </select>}
         {form.formState.errors.sellerSlug && <span className="field-error">{form.formState.errors.sellerSlug.message}</span>}
-        {sellers.isError && <span className="field-error" role="alert">Não foi possível carregar os vendedores. Tente novamente.</span>}
-        {sellers.isSuccess && sellers.data.length === 0 && <span className="field-error" role="alert">Nenhum vendedor está disponível para atendimento no momento.</span>}
+        {!sellerSlug && sellers.isError && <span className="field-error" role="alert">Não foi possível carregar os vendedores. Tente novamente.</span>}
+        {!sellerSlug && sellers.isSuccess && sellers.data.length === 0 && <span className="field-error" role="alert">Nenhum vendedor está disponível para atendimento no momento.</span>}
       </label>
       <label className="field-label">Seu nome
         <input className="field-input" autoComplete="name" {...form.register("name")} placeholder="Nome completo" />
@@ -119,7 +129,7 @@ export function InterestForm({ motorcycleSlug, sellerSlug, compact = false }: In
       </label>
       {form.formState.errors.consent && <p className="field-error">{form.formState.errors.consent.message}</p>}
       {mutation.isError && <p className="field-error" role="alert">{errorMessage(mutation.error)}</p>}
-      <Button className="w-full" type="submit" disabled={mutation.isPending || !sellers.isSuccess || sellers.data.length === 0}>
+      <Button className="w-full" type="submit" disabled={mutation.isPending || (!sellerSlug && (!sellers.isSuccess || sellers.data.length === 0))}>
         {mutation.isPending ? <LoaderCircle className="animate-spin" size={17} /> : <Send size={16} />}
         {mutation.isPending ? "Enviando..." : "Quero saber mais"}
       </Button>

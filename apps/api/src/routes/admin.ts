@@ -1,10 +1,13 @@
 import bcrypt from "bcryptjs";
 import { MotorcycleOptionType, MotorcycleStatus, Prisma, UserRole } from "@prisma/client";
 import { randomUUID } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma } from "../db";
 import { allowRoles } from "../lib/auth";
+import { removeSellerPhoto, sellerPhotoDirectory } from "../lib/seller-photos";
 
 const webUrl = z.string().url().max(1000).refine((value) => ["http:", "https:"].includes(new URL(value).protocol));
 const motorcycleYear = z.string().trim().min(1).max(20).regex(/^[A-Za-z0-9][A-Za-z0-9 /.-]*$/, "Informe um ano válido, como 26/27.");
@@ -28,6 +31,7 @@ const motorcycleInput = z.object({
   transmission: z.string().trim().max(60).optional(),
   priceCents: z.string().regex(/^\d+$/),
   promotionalCents: z.string().regex(/^\d+$/).optional(),
+  showPriceOnCatalog: z.boolean().optional(),
   description: z.string().max(5000).optional(),
   specifications: z.record(z.unknown()).optional(),
   imageUrl: webUrl.optional(),
@@ -47,6 +51,12 @@ const sellerInput = z.object({
   photoUrl: webUrl.optional(),
   bio: z.string().max(1000).optional(),
 });
+
+const sellerPhotoTypes = {
+  "image/jpeg": { extension: "jpg", signature: (buffer: Buffer) => buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff },
+  "image/png": { extension: "png", signature: (buffer: Buffer) => buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) },
+  "image/webp": { extension: "webp", signature: (buffer: Buffer) => buffer.length >= 12 && buffer.toString("ascii", 0, 4) === "RIFF" && buffer.toString("ascii", 8, 12) === "WEBP" },
+} as const;
 
 function toSlug(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
@@ -450,5 +460,77 @@ export async function adminRoutes(app: FastifyInstance) {
       data: { userId: request.user.sub, action: "seller.updated", entity: "Seller", entityId: id },
     });
     return reply.send({ seller });
+  });
+
+  app.post("/sellers/:id/photo", {
+    preHandler: allowRoles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.MANAGER),
+    schema: { tags: ["inventory"], summary: "Enviar foto de perfil do vendedor", security: [{ sessionCookie: [] }] },
+  }, async (request, reply) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params);
+    const seller = await prisma.seller.findUnique({ where: { id }, select: { photoUrl: true } });
+    if (!seller) return reply.code(404).send({ error: "not_found", message: "Vendedor não encontrado." });
+
+    const file = await request.file();
+    if (!file || file.fieldname !== "photo") {
+      return reply.code(400).send({ error: "invalid_file", message: "Selecione uma foto para enviar." });
+    }
+    const format = sellerPhotoTypes[file.mimetype as keyof typeof sellerPhotoTypes];
+    if (!format) {
+      file.file.resume();
+      return reply.code(415).send({ error: "unsupported_media_type", message: "Envie uma foto JPG, PNG ou WebP." });
+    }
+    const buffer = await file.toBuffer();
+    if (!format.signature(buffer)) {
+      return reply.code(415).send({ error: "unsupported_media_type", message: "O conteúdo do arquivo não corresponde a uma imagem JPG, PNG ou WebP válida." });
+    }
+
+    const filename = `${randomUUID()}.${format.extension}`;
+    await mkdir(sellerPhotoDirectory, { recursive: true });
+    await writeFile(join(sellerPhotoDirectory, filename), buffer, { flag: "wx", mode: 0o644 });
+    const photoUrl = `public/seller-photos/${filename}`;
+    try {
+      const updatedSeller = await prisma.$transaction(async (transaction) => {
+        const updated = await transaction.seller.update({ where: { id }, data: { photoUrl } });
+        await transaction.auditLog.create({
+          data: { userId: request.user.sub, action: "seller.photo.updated", entity: "Seller", entityId: id },
+        });
+        return updated;
+      });
+      try {
+        await removeSellerPhoto(seller.photoUrl);
+      } catch (error) {
+        request.log.warn({ err: error, sellerId: id }, "Failed to remove replaced seller photo");
+      }
+      return reply.send({ seller: updatedSeller });
+    } catch (error) {
+      try {
+        await removeSellerPhoto(photoUrl);
+      } catch (cleanupError) {
+        request.log.error({ err: cleanupError, sellerId: id }, "Failed to clean up an unsuccessful seller photo upload");
+      }
+      throw error;
+    }
+  });
+
+  app.delete("/sellers/:id/photo", {
+    preHandler: allowRoles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.MANAGER),
+    schema: { tags: ["inventory"], summary: "Remover foto de perfil do vendedor", security: [{ sessionCookie: [] }] },
+  }, async (request, reply) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params);
+    const seller = await prisma.seller.findUnique({ where: { id }, select: { photoUrl: true } });
+    if (!seller) return reply.code(404).send({ error: "not_found", message: "Vendedor não encontrado." });
+    const updatedSeller = await prisma.$transaction(async (transaction) => {
+      const updated = await transaction.seller.update({ where: { id }, data: { photoUrl: null } });
+      await transaction.auditLog.create({
+        data: { userId: request.user.sub, action: "seller.photo.deleted", entity: "Seller", entityId: id },
+      });
+      return updated;
+    });
+    try {
+      await removeSellerPhoto(seller.photoUrl);
+    } catch (error) {
+      request.log.warn({ err: error, sellerId: id }, "Failed to remove seller photo");
+    }
+    return reply.send({ seller: updatedSeller });
   });
 }

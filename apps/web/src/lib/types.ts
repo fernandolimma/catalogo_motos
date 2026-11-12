@@ -16,6 +16,7 @@ export type Motorcycle = {
   imageUrl?: string | null;
   priceCents: string;
   promotionalCents: string | null;
+  showPriceOnCatalog?: boolean;
   availableToAllSellers?: boolean;
   isFeatured: boolean;
   status: string;

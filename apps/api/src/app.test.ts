@@ -52,6 +52,23 @@ test("publishes the public catalog and lead intake in OpenAPI", async () => {
     assert.ok(specification.paths["/api/v1/crm/reports"]);
     assert.ok(specification.paths["/api/v1/motorcycles/{id}"]);
     assert.ok(specification.paths["/api/v1/sellers/{id}"]);
+    assert.ok(specification.paths["/api/v1/sellers/{id}/photo"]);
+    assert.ok(specification.paths["/api/v1/public/seller-photos/{filename}"]);
+  } finally {
+    await app.close();
+  }
+});
+
+test("protects seller photo upload and removal endpoints", async () => {
+  const app = await buildApp();
+  try {
+    const sellerId = "00000000-0000-4000-8000-000000000001";
+    const responses = await Promise.all([
+      app.inject({ method: "POST", url: `/api/v1/sellers/${sellerId}/photo`, payload: {} }),
+      app.inject({ method: "DELETE", url: `/api/v1/sellers/${sellerId}/photo` }),
+      app.inject({ method: "GET", url: "/api/v1/public/seller-photos/not-a-photo.png" }),
+    ]);
+    assert.deepEqual(responses.map((response) => response.statusCode), [403, 403, 400]);
   } finally {
     await app.close();
   }

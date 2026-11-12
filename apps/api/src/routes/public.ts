@@ -1,8 +1,11 @@
 import type { FastifyInstance } from "fastify";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../db";
 import { normalizePhone } from "../lib/phone";
+import { sellerPhotoDirectory } from "../lib/seller-photos";
 
 const catalogQuery = z.object({
   q: z.string().trim().max(100).optional(),
@@ -39,6 +42,30 @@ function publicMotorcycle<T extends {
 }
 
 export async function publicRoutes(app: FastifyInstance) {
+  app.get("/seller-photos/:filename", {
+    schema: { tags: ["public"], summary: "Consultar foto pública do perfil de vendedor" },
+  }, async (request, reply) => {
+    const { filename } = z.object({
+      filename: z.string().regex(/^[0-9a-f-]{36}\.(?:jpg|png|webp)$/i),
+    }).parse(request.params);
+    const contentTypes = { jpg: "image/jpeg", png: "image/png", webp: "image/webp" } as const;
+    const extension = filename.split(".").at(-1) as keyof typeof contentTypes;
+    let image: Buffer;
+    try {
+      image = await readFile(join(sellerPhotoDirectory, filename));
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+        return reply.code(404).send({ error: "not_found", message: "Foto não encontrada." });
+      }
+      throw error;
+    }
+    return reply
+      .type(contentTypes[extension])
+      .header("cross-origin-resource-policy", "cross-origin")
+      .header("cache-control", "public, max-age=31536000, immutable")
+      .send(image);
+  });
+
   app.get("/motorcycles", {
     schema: { tags: ["public"], summary: "Listar motos publicadas", querystring: { type: "object" } },
   }, async (request, reply) => {

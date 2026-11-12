@@ -37,8 +37,11 @@ services:
       EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:?Set EVOLUTION_API_KEY in .env}
       EVOLUTION_INSTANCE: ${EVOLUTION_INSTANCE:-catalogo-motos}
       EVOLUTION_WEBHOOK_SECRET: ${EVOLUTION_WEBHOOK_SECRET:?Set EVOLUTION_WEBHOOK_SECRET in .env}
+      UPLOAD_DIR: /app/apps/api/uploads/sellers
     ports:
       - "127.0.0.1:3001:3001"
+    volumes:
+      - seller_uploads:/app/apps/api/uploads/sellers
     depends_on:
       db:
         condition: service_healthy
@@ -137,6 +140,7 @@ volumes:
   evolution_postgres_data:
   evolution_redis_data:
   evolution_instances:
+  seller_uploads:
 
 networks:
   catalogo:

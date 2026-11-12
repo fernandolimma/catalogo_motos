@@ -17,6 +17,7 @@ COPY --from=build /app/apps/web/package.json /app/apps/web/package.json
 COPY --from=build /app/node_modules /app/node_modules
 COPY --from=build /app/apps/api/dist /app/apps/api/dist
 COPY --from=build /app/apps/api/prisma /app/apps/api/prisma
+RUN mkdir -p /app/apps/api/uploads/sellers && chown -R node:node /app/apps/api/uploads
 USER node
 WORKDIR /app/apps/api
 EXPOSE 3001

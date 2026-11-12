@@ -2,6 +2,7 @@ import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import jwt from "@fastify/jwt";
+import multipart from "@fastify/multipart";
 import rateLimit from "@fastify/rate-limit";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
@@ -37,6 +38,7 @@ export async function buildApp() {
     origin: process.env.WEB_ORIGIN?.split(",").map((value) => value.trim()) ?? ["http://localhost:5173"],
     credentials: true,
   });
+  await app.register(multipart, { limits: { fileSize: 1_048_576, files: 1 } });
   await app.register(helmet);
   await app.register(cookie);
   await app.register(jwt, {
@@ -93,6 +95,9 @@ export async function buildApp() {
     }
     if (typeof error === "object" && error !== null && "code" in error && error.code === "FST_ERR_CTP_BODY_TOO_LARGE") {
       return reply.code(413).send({ error: "payload_too_large", message: "O arquivo enviado excede o limite permitido." });
+    }
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "FST_REQ_FILE_TOO_LARGE") {
+      return reply.code(413).send({ error: "payload_too_large", message: "A foto deve ter no máximo 1 MB." });
     }
     request.log.error({ err: error }, "Request failed");
     return reply.code(500).send({ error: "internal_error", message: "Não foi possível concluir a solicitação." });
