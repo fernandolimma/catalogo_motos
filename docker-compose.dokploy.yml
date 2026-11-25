@@ -1,0 +1,54 @@
+services:
+  api:
+    environment:
+      WEB_ORIGIN: ${WEB_ORIGIN:-https://indmotoscrm.com.br,https://www.indmotoscrm.com.br}
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      - traefik.http.routers.indmotoscrm-api.rule=(Host(`indmotoscrm.com.br`) || Host(`www.indmotoscrm.com.br`)) && (PathPrefix(`/api`) || PathPrefix(`/docs`))
+      - traefik.http.routers.indmotoscrm-api.entrypoints=websecure
+      - traefik.http.routers.indmotoscrm-api.tls=true
+      - traefik.http.routers.indmotoscrm-api.tls.certresolver=letsencrypt
+      - traefik.http.routers.indmotoscrm-api.priority=100
+      - traefik.http.services.indmotoscrm-api.loadbalancer.server.port=3001
+    networks:
+      - catalogo
+      - dokploy-proxy
+
+  web:
+    build:
+      args:
+        VITE_API_URL: ${VITE_API_URL:-/api/v1}
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      - traefik.http.routers.indmotoscrm-web.rule=Host(`indmotoscrm.com.br`) || Host(`www.indmotoscrm.com.br`)
+      - traefik.http.routers.indmotoscrm-web.entrypoints=websecure
+      - traefik.http.routers.indmotoscrm-web.tls=true
+      - traefik.http.routers.indmotoscrm-web.tls.certresolver=letsencrypt
+      - traefik.http.services.indmotoscrm-web.loadbalancer.server.port=80
+      - traefik.http.routers.indmotoscrm-redirect.rule=Host(`indmotoscrm.com.br`) || Host(`www.indmotoscrm.com.br`)
+      - traefik.http.routers.indmotoscrm-redirect.entrypoints=web
+      - traefik.http.routers.indmotoscrm-redirect.middlewares=indmotoscrm-https-redirect
+      - traefik.http.routers.indmotoscrm-redirect.service=indmotoscrm-web
+      - traefik.http.middlewares.indmotoscrm-https-redirect.redirectscheme.scheme=https
+    networks:
+      - catalogo
+      - dokploy-proxy
+
+networks:
+  catalogo: {}
+  dokploy-proxy:
+    external: true
+    name: dokploy-network
+
+volumes:
+  seller_uploads:
+    external: true
+    name: indmotoscrm_seller_uploads
+  evolution_instances:
+    external: true
+    name: indmotoscrm_evolution_instances
+  evolution_redis_data:
+    external: true
+    name: indmotoscrm_evolution_redis_data_migrated

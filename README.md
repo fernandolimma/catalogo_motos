@@ -199,6 +199,19 @@ Adapte usuário e banco às variáveis `POSTGRES_USER` e `POSTGRES_DB`. Armazene
 
 O Compose fornecido é uma base reproduzível, não substitui hardening de VPS, firewall, TLS, gestão de segredos, observabilidade ou revisão jurídica.
 
+### Dokploy
+
+Para publicar `indmotoscrm.com.br` e `www.indmotoscrm.com.br` usando a rede e o resolvedor HTTPS do Dokploy, defina `WEB_ORIGIN=https://indmotoscrm.com.br,https://www.indmotoscrm.com.br` e `VITE_API_URL=/api/v1` no `.env`, então inicie a stack com:
+
+```sh
+docker volume create indmotoscrm_seller_uploads
+docker volume create indmotoscrm_evolution_instances
+docker volume create indmotoscrm_evolution_redis_data_migrated
+docker compose -f docker-compose.yml -f docker-compose.dokploy.yml up --build -d
+```
+
+Crie esses volumes persistentes antes da primeira inicialização. O overlay encaminha `/api` e `/docs` à API, o restante ao frontend e redireciona HTTP para HTTPS pela rede externa `dokploy-network`. Configure os registros DNS A e CNAME antes de iniciar para que o Traefik possa emitir os certificados ACME. Os bancos, a API e a Evolution continuam sem portas públicas.
+
 ## Qualidade e validação
 
 ```powershell
