@@ -33,7 +33,7 @@ const motorcycleInput = z.object({
   promotionalCents: z.string().regex(/^\d+$/).optional(),
   showPriceOnCatalog: z.boolean().optional(),
   description: z.string().max(5000).optional(),
-  specifications: z.record(z.unknown()).optional(),
+  specifications: z.record(z.string(), z.unknown()).optional(),
   imageUrl: webUrl.optional(),
   internalCode: z.string().trim().max(80).optional(),
   isPublished: z.boolean().optional(),
@@ -220,7 +220,7 @@ export async function adminRoutes(app: FastifyInstance) {
       email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()),
       password: z.string().min(12).max(200),
       role: z.nativeEnum(UserRole),
-      sellerId: z.string().uuid().optional(),
+      sellerId: z.string().uuid().nullable().optional(),
     }).superRefine((value, context) => {
       if (value.role === UserRole.SELLER && !value.sellerId) {
         context.addIssue({ code: z.ZodIssueCode.custom, path: ["sellerId"], message: "Vincule o vendedor à conta." });

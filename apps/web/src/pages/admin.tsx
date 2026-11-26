@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Activity, ArrowDownRight, ArrowUpRight, CheckCheck, CircleHelp, ClipboardList, Download, Search, Users, X } from "lucide-react";
+import { Activity, ArrowDownRight, ArrowUpRight, CheckCheck, ChevronLeft, ChevronRight, CircleHelp, ClipboardList, Download, Search, Users, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Button } from "../components/ui/button";
@@ -10,6 +10,7 @@ import { api, errorMessage } from "../lib/api";
 import { formatBRL, leadStages, stageLabels, type Lead } from "../lib/types";
 
 type LeadPage = { items: Lead[]; pagination: { total: number; pages: number; page: number } };
+const leadsPerPage = 5;
 type Overview = { total: number; byStage: Record<string, number>; conversion: number };
 type SalesReport = {
   period: { from: string; to: string };
@@ -78,6 +79,7 @@ export function AdminPage() {
   const cache = useQueryClient();
   const [search, setSearch] = useState("");
   const [activeStage, setActiveStage] = useState<string>("");
+  const [leadsPage, setLeadsPage] = useState(1);
   const [selectedLead, setSelectedLead] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [reportFrom, setReportFrom] = useState(() => {
@@ -92,10 +94,15 @@ export function AdminPage() {
   }, [auth.isError, navigate]);
 
   const leads = useQuery({
-    queryKey: ["leads", search, activeStage],
-    queryFn: async () => (await api.get<LeadPage>("/leads", { params: { q: search || undefined, stage: activeStage || undefined, limit: 50 } })).data,
+    queryKey: ["leads", search, activeStage, leadsPage],
+    queryFn: async () => (await api.get<LeadPage>("/leads", { params: { q: search || undefined, stage: activeStage || undefined, page: leadsPage, limit: leadsPerPage } })).data,
     enabled: auth.isSuccess,
   });
+  useEffect(() => {
+    if (leads.data && leadsPage > Math.max(leads.data.pagination.pages, 1)) {
+      setLeadsPage(Math.max(leads.data.pagination.pages, 1));
+    }
+  }, [leads.data, leadsPage]);
   const sellers = useQuery({
     queryKey: ["inventory-sellers"],
     queryFn: async () => (await api.get<{ items: Array<{ id: string; name: string; slug: string }> }>("/sellers")).data.items,
@@ -251,11 +258,11 @@ export function AdminPage() {
           <Card className="overflow-hidden rounded-2xl shadow-none">
             <div className="flex flex-col justify-between gap-4 p-5 sm:flex-row sm:items-center">
               <div><p className="text-sm font-bold">Leads recentes</p><p className="mt-1 text-xs text-muted">{leads.data?.pagination.total ?? 0} registros encontrados</p></div>
-              <label className="flex h-10 items-center gap-2 rounded-xl bg-paper px-3 sm:w-64"><Search size={15} className="text-muted" /><input className="w-full bg-transparent text-xs outline-none placeholder:text-muted" placeholder="Buscar nome ou telefone" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
+              <label className="flex h-10 items-center gap-2 rounded-xl bg-paper px-3 sm:w-64"><Search size={15} className="text-muted" /><input className="w-full bg-transparent text-xs outline-none placeholder:text-muted" placeholder="Buscar nome ou telefone" value={search} onChange={(event) => { setSearch(event.target.value); setLeadsPage(1); }} /></label>
             </div>
             <div className="flex gap-2 overflow-x-auto border-y border-black/5 px-5 py-3">
-              <button onClick={() => setActiveStage("")} className={`shrink-0 rounded-full px-3 py-1.5 text-[10px] font-bold ${activeStage === "" ? "bg-ink text-white" : "bg-paper text-muted"}`}>Todos</button>
-              {leadStages.map((stage) => <button key={stage} onClick={() => setActiveStage(stage)} className={`shrink-0 rounded-full px-3 py-1.5 text-[10px] font-bold ${activeStage === stage ? "bg-ink text-white" : "bg-paper text-muted"}`}>{stageLabels[stage]}</button>)}
+              <button onClick={() => { setActiveStage(""); setLeadsPage(1); }} className={`shrink-0 rounded-full px-3 py-1.5 text-[10px] font-bold ${activeStage === "" ? "bg-ink text-white" : "bg-paper text-muted"}`}>Todos</button>
+              {leadStages.map((stage) => <button key={stage} onClick={() => { setActiveStage(stage); setLeadsPage(1); }} className={`shrink-0 rounded-full px-3 py-1.5 text-[10px] font-bold ${activeStage === stage ? "bg-ink text-white" : "bg-paper text-muted"}`}>{stageLabels[stage]}</button>)}
             </div>
             {leads.isLoading ? <p className="p-10 text-center text-xs text-muted">Carregando leads...</p> : null}
             {leads.isError ? <p className="p-10 text-center text-xs text-red-700" role="alert">{errorMessage(leads.error)}</p> : null}
@@ -295,6 +302,22 @@ export function AdminPage() {
                 </tbody>
               </table>
             </div> : null}
+            <footer className="flex flex-col gap-3 border-t border-black/5 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-[11px] text-muted">
+                {leads.isLoading ? "Carregando leads..." : leads.isError && !leads.data ? "Não foi possível carregar os leads" : leads.data?.pagination.total
+                  ? `Exibindo ${(leadsPage - 1) * leadsPerPage + 1}–${Math.min(leadsPage * leadsPerPage, leads.data.pagination.total)} de ${leads.data.pagination.total}`
+                  : "Nenhum lead para exibir"}
+              </p>
+              <div className="flex items-center justify-end gap-2">
+                <Button type="button" size="small" variant="outline" aria-label="Página anterior" disabled={leadsPage <= 1 || leads.isFetching} onClick={() => setLeadsPage((page) => page - 1)}>
+                  <ChevronLeft size={15} /> Anterior
+                </Button>
+                <span className="min-w-16 text-center text-[11px] text-muted">{leadsPage} / {Math.max(leads.data?.pagination.pages ?? 0, 1)}</span>
+                <Button type="button" size="small" variant="outline" aria-label="Próxima página" disabled={!leads.data || leadsPage >= leads.data.pagination.pages || leads.isFetching} onClick={() => setLeadsPage((page) => page + 1)}>
+                  Próxima <ChevronRight size={15} />
+                </Button>
+              </div>
+            </footer>
           </Card>
         </section>
         {stageMutation.isError && <p className="mt-4 text-xs text-red-700" role="alert">{errorMessage(stageMutation.error)}</p>}

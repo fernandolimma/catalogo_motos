@@ -67,6 +67,7 @@ model User {
   failedLoginCount Int             @default(0)
   lockedUntil     DateTime?
   seller          Seller?
+  whatsAppInstance WhatsAppInstance?
   activities      LeadActivity[]
   refreshSessions RefreshSession[]
   auditLogs       AuditLog[]
@@ -311,6 +312,8 @@ model AuditLog {
 model WhatsAppInstance {
   id           String        @id @default(uuid()) @db.Uuid
   name         String        @unique
+  ownerId      String?       @unique @db.Uuid
+  owner        User?         @relation(fields: [ownerId], references: [id], onDelete: SetNull)
   baseUrl      String?
   isActive     Boolean       @default(false)
   lastCheckedAt DateTime?

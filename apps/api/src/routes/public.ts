@@ -26,7 +26,7 @@ const leadSchema = z.object({
   bestContactTime: z.string().trim().max(100).optional(),
   motorcycleSlug: z.string().trim().max(180).optional(),
   sourcePage: z.string().trim().max(500).optional(),
-  utm: z.record(z.string().max(200)).optional(),
+  utm: z.record(z.string(), z.string().max(200)).optional(),
   consent: z.literal(true),
 });
 

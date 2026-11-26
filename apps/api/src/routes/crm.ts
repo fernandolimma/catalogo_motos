@@ -55,6 +55,7 @@ export async function crmRoutes(app: FastifyInstance) {
   }, async (request, reply) => {
     const body = z.object({
       sellerId: z.string().uuid().optional(),
+      motorcycleId: z.string().uuid().optional(),
       name: z.string().trim().min(2).max(120),
       phone: z.string().trim().min(10).max(30),
       email: z.string().trim().email().max(254),
@@ -67,7 +68,7 @@ export async function crmRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: "invalid_phone", message: "Informe um telefone com DDD válido." });
     }
 
-    const [seller, origin, duplicate] = await Promise.all([
+    const [seller, origin, duplicate, motorcycle] = await Promise.all([
       request.user.role === UserRole.SELLER
         ? prisma.seller.findUnique({ where: { userId: request.user.sub }, select: { id: true, isActive: true } })
         : body.sellerId
@@ -75,6 +76,9 @@ export async function crmRoutes(app: FastifyInstance) {
           : Promise.resolve(null),
       prisma.motorcycleOption.findUnique({ where: { id: body.originId }, select: { id: true, type: true, value: true } }),
       prisma.lead.findUnique({ where: { normalizedPhone }, select: { id: true } }),
+      body.motorcycleId
+        ? prisma.motorcycle.findFirst({ where: { id: body.motorcycleId, isPublished: true, status: "AVAILABLE" }, select: { id: true } })
+        : Promise.resolve(null),
     ]);
     if (!seller?.isActive) {
       return reply.code(400).send({ error: "invalid_seller", message: "Selecione um vendedor ativo para o atendimento." });
@@ -87,6 +91,9 @@ export async function crmRoutes(app: FastifyInstance) {
     }
     if (duplicate) {
       return reply.code(409).send({ error: "lead_exists", message: "Já existe um lead cadastrado com este telefone." });
+    }
+    if (body.motorcycleId && !motorcycle) {
+      return reply.code(409).send({ error: "unavailable", message: "Esta motocicleta não está mais disponível no catálogo." });
     }
 
     try {
@@ -101,6 +108,8 @@ export async function crmRoutes(app: FastifyInstance) {
             message: body.message,
             source: origin.value,
             sellerId: seller.id,
+            motorcycleId: motorcycle?.id,
+            ...(motorcycle ? { interests: { create: { motorcycleId: motorcycle.id } } } : {}),
             stageHistory: { create: { toStage: LeadStage.NEW, userId: request.user.sub } },
             activities: {
               create: {
@@ -186,6 +195,33 @@ export async function crmRoutes(app: FastifyInstance) {
       },
     });
     if (!lead) return reply.code(404).send({ error: "not_found", message: "Lead não encontrado." });
+    if (request.user.role !== UserRole.ADMIN) {
+      const instanceIds = lead.activities.flatMap((activity) => {
+        const metadata = activity.metadata;
+        if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) return [];
+        return metadata.source === "whatsapp-webhook" && z.string().uuid().safeParse(metadata.instanceId).success
+          ? [String(metadata.instanceId)]
+          : [];
+      });
+      const instances = await prisma.whatsAppInstance.findMany({
+        where: {
+          id: { in: instanceIds },
+          ownerId: request.user.role === UserRole.MANAGER || request.user.role === UserRole.SUPERVISOR
+            ? { not: null }
+            : request.user.sub,
+        },
+        select: { id: true },
+      });
+      const visibleInstances = new Set(instances.map((instance) => instance.id));
+      lead.activities = lead.activities.filter((activity) => {
+        const metadata = activity.metadata;
+        if (typeof metadata === "object" && metadata !== null && !Array.isArray(metadata) && metadata.source === "whatsapp-webhook") {
+          return typeof metadata.instanceId === "string" && visibleInstances.has(metadata.instanceId);
+        }
+        return !(activity.type === ActivityType.WHATSAPP && activity.userId === null
+          && (activity.content.startsWith("Mensagem recebida pelo WhatsApp: ") || activity.content.startsWith("Mensagem enviada pelo WhatsApp: ")));
+      });
+    }
     return reply.send({ lead });
   });
 

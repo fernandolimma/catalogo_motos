@@ -50,7 +50,7 @@ export function AdminShell({ children, userName, role, fullScreen = false }: Adm
           <Link to="/admin" activeOptions={{ exact: true }} className={linkClass(pathname === "/admin")}><LayoutDashboard size={16} /> Painel comercial</Link>
           <Link to="/admin/funil" className={linkClass(pathname === "/admin/funil")}><Columns3 size={16} /> Funil de vendas</Link>
           {["ADMIN", "SUPERVISOR", "MANAGER", "SELLER", "SUPPORT"].includes(role) && <Link to="/admin/contatos" className={linkClass(pathname === "/admin/contatos")}><Users size={16} /> Contatos</Link>}
-          {["ADMIN", "SUPERVISOR", "MANAGER", "SELLER"].includes(role) && <Link to="/admin/whatsapp" className={linkClass(pathname === "/admin/whatsapp")}><MessageCircle size={16} /> WhatsApp</Link>}
+          {["ADMIN", "SUPERVISOR", "MANAGER", "SELLER", "SUPPORT"].includes(role) && <Link to="/admin/whatsapp" className={linkClass(pathname === "/admin/whatsapp")}><MessageCircle size={16} /> WhatsApp</Link>}
           {["ADMIN", "SELLER"].includes(role) && <Link to="/admin/leads/cadastrar" className={linkClass(pathname === "/admin/leads/cadastrar")}><UserPlus size={16} /> Cadastrar lead</Link>}
           {canManageInventory && <>
             <Link to="/admin/estoque" className={linkClass(pathname === "/admin/estoque")}><Bike size={16} /> Estoque</Link>

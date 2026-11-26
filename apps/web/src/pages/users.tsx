@@ -78,11 +78,11 @@ export function UsersPage() {
         name: values.name,
         email: values.email,
         role: values.role,
-        sellerId: ["SELLER", "SUPPORT"].includes(values.role) ? values.sellerId || null : null,
         ...(values.password ? { password: values.password } : {}),
       };
-      if (editingUser) return api.patch(`/users/${editingUser.id}`, payload);
-      return api.post("/users", payload);
+      const sellerId = ["SELLER", "SUPPORT"].includes(values.role) ? values.sellerId || null : null;
+      if (editingUser) return api.patch(`/users/${editingUser.id}`, { ...payload, sellerId });
+      return api.post("/users", { ...payload, ...(sellerId ? { sellerId } : {}) });
     },
     onSuccess: async (_result, values) => {
       if (editingUser?.id === currentUserId && values.password) {

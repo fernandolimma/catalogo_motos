@@ -1,7 +1,51 @@
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import test from "node:test";
 import { buildApp } from "./app";
 import { connectionQrFrom } from "./routes/whatsapp";
+
+test("accepts existing HS256 sessions and rejects modified or expired tokens", async () => {
+  const app = await buildApp();
+  try {
+    const secret = process.env.JWT_SECRET ?? "development-secret-change-before-running";
+    const makeToken = (expires: number) => {
+      const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+      const payload = Buffer.from(JSON.stringify({ sub: "existing-user", ver: 0, exp: expires })).toString("base64url");
+      const data = `${header}.${payload}`;
+      const signature = createHmac("sha256", secret).update(data).digest("base64url");
+      return `${data}.${signature}`;
+    };
+    const now = Math.floor(Date.now() / 1000);
+    const token = makeToken(now + 3600);
+    assert.equal(app.jwt.verify<{ sub: string }>(token).sub, "existing-user");
+    const [header, payload] = token.split(".");
+    assert.throws(() => app.jwt.verify(`${header}.${payload}.${"A".repeat(43)}`));
+    assert.throws(() => app.jwt.verify(makeToken(now - 1)));
+  } finally {
+    await app.close();
+  }
+});
+
+test("validates public lead UTM values after the Zod upgrade", async () => {
+  const app = await buildApp();
+  try {
+    const payload = {
+      sellerSlug: "seller-test", name: "Cliente Teste", phone: "abcdefghij",
+      email: "cliente@example.com", consent: true,
+    };
+    const valid = await app.inject({
+      method: "POST", url: "/api/v1/public/leads", payload: { ...payload, utm: { utm_source: "catalogo" } },
+    });
+    assert.equal(valid.json<{ error: string }>().error, "invalid_phone");
+    const tooLong = await app.inject({
+      method: "POST", url: "/api/v1/public/leads", payload: { ...payload, utm: { utm_source: "x".repeat(201) } },
+    });
+    assert.equal(tooLong.statusCode, 400);
+    assert.equal(tooLong.json<{ error: string }>().error, "validation_error");
+  } finally {
+    await app.close();
+  }
+});
 
 test("reads Evolution QR data from top-level and nested responses without exposing other fields", () => {
   const qrData = "data:image/png;base64,example";

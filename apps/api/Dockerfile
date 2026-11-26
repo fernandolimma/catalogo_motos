@@ -1,9 +1,9 @@
 FROM node:22-alpine AS build
 WORKDIR /app
-COPY package.json tsconfig.base.json ./
+COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY apps/web/package.json apps/web/package.json
-RUN npm install
+RUN npm ci
 COPY apps/api apps/api
 RUN npm run db:generate -w @catalogo/api && npm run build -w @catalogo/api
 RUN npm prune --omit=dev --workspace=@catalogo/api --include-workspace-root=false

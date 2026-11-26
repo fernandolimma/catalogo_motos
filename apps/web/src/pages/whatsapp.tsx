@@ -23,6 +23,7 @@ type ChatMessage = {
 type Chat = {
   id: string;
   remoteJid: string;
+  instance: { ownerId: string | null; owner: { name: string } | null };
   updatedAt: string;
   lead?: { id: string; name: string; phone: string } | null;
   messages: ChatMessage[];
@@ -144,7 +145,7 @@ export function WhatsAppPage() {
   }, [messages.data]);
 
   const connect = useMutation({
-    mutationFn: async () => (await api.post<Connection>("/whatsapp/connect")).data,
+    mutationFn: async () => (await api.post<Connection>("/whatsapp/connect", undefined, { timeout: 95_000 })).data,
     onSuccess: async () => {
       await Promise.all([
         cache.invalidateQueries({ queryKey: ["whatsapp-status"] }),
@@ -252,23 +253,29 @@ export function WhatsAppPage() {
       await cache.invalidateQueries({ queryKey: ["whatsapp-chats"] });
     },
   });
+  const activeChat = chats.data?.find((chat) => chat.id === selectedChat)
+    ?? (leadChat.data?.id === selectedChat ? leadChat.data : undefined);
+  const canWrite = Boolean(currentUser?.id && activeChat?.instance.ownerId === currentUser.id);
   const markChatRead = markRead.mutate;
   useEffect(() => {
-    if (selectedChat) markChatRead(selectedChat);
-  }, [markChatRead, selectedChat]);
+    if (selectedChat && canWrite) markChatRead(selectedChat);
+  }, [canWrite, markChatRead, selectedChat]);
+  useEffect(() => {
+    setText("");
+    setReplyTo(null);
+    setForwardingMessage(null);
+    setForwardTarget("");
+  }, [selectedChat]);
 
   if (auth.isLoading || !auth.isSuccess) {
     return <main className="flex min-h-screen items-center justify-center bg-paper text-sm text-muted">Verificando sessão...</main>;
   }
-  if (!["ADMIN", "SUPERVISOR", "MANAGER", "SELLER"].includes(currentUser?.role ?? "")) {
+  if (!["ADMIN", "SUPERVISOR", "MANAGER", "SELLER", "SUPPORT"].includes(currentUser?.role ?? "")) {
     return <main className="page-wrap py-24 text-center"><p className="font-bold">Seu perfil não pode acessar o chat do WhatsApp.</p><Link className="mt-4 inline-block text-sm text-pine underline" to="/admin">Voltar ao CRM</Link></main>;
   }
-  const isAdmin = currentUser?.role === "ADMIN";
-  const activeChat = chats.data?.find((chat) => chat.id === selectedChat)
-    ?? (leadChat.data?.id === selectedChat ? leadChat.data : undefined);
   const qrCode = connect.data?.qrCode;
   const qrSource = qrCode ? (qrCode.startsWith("data:") ? qrCode : `data:image/png;base64,${qrCode}`) : null;
-  const isConnected = connection.data?.state === "open" || connect.data?.state === "open";
+  const isConnected = connection.data?.state === "open";
 
   return (
     <AdminShell userName={currentUser?.name ?? "Usuário"} role={currentUser?.role ?? "SELLER"} fullScreen>
@@ -318,12 +325,12 @@ export function WhatsAppPage() {
             </div>
           </header>
 
-          {!isConnected && isAdmin && (
+          {!isConnected && (
             <div className="border-b border-[#2a3942] p-3">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-2">
                   <Smartphone size={17} className="shrink-0 text-[#00a884]" />
-                  <p className="truncate text-xs font-semibold">Conecte o WhatsApp da loja</p>
+                  <p className="truncate text-xs font-semibold">Conecte seu WhatsApp</p>
                 </div>
                 <Button type="button" size="small" className="!min-h-8 !rounded-lg !bg-[#00a884] !px-3 !text-[10px] !text-white hover:!bg-[#06cf9c]" onClick={() => connect.mutate()} disabled={connect.isPending}>
                   {connect.isPending ? <LoaderCircle size={13} className="animate-spin" /> : <QrCode size={13} />}
@@ -336,8 +343,6 @@ export function WhatsAppPage() {
               </div>}
             </div>
           )}
-          {!isConnected && !isAdmin && <p className="border-b border-[#2a3942] p-3 text-xs text-amber-300">Peça ao administrador para conectar o WhatsApp.</p>}
-
           <div className="min-h-0 flex-1 overflow-y-auto">
             {connection.isError && <p className="m-3 rounded-lg bg-red-950/60 p-3 text-xs text-red-200" role="alert">{errorMessage(connection.error)}</p>}
             {leadId && leadChat.isLoading && <p className="m-3 rounded-lg bg-[#202c33] p-3 text-xs text-[#aebac1]">Localizando a conversa deste Lead...</p>}
@@ -377,10 +382,11 @@ export function WhatsAppPage() {
                               <span className="block truncate text-[11px] text-[#aebac1]">{lastMessage?.content ?? "Sem mensagens"}</span>
                               {chat._count.messages > 0 && <span className="shrink-0 rounded-full bg-[#00a884] px-1.5 py-0.5 text-[9px] font-bold text-[#111b21]">{chat._count.messages}</span>}
                             </span>
+                            {chat.instance.ownerId !== currentUser?.id && <span className="mt-1 block truncate text-[10px] text-[#8696a0]">WhatsApp: {chat.instance.owner?.name ?? "Histórico anterior"}</span>}
                           </span>
                         </span>
                       </button>
-                      <div className="flex shrink-0 flex-col gap-0.5">
+                      {chat.instance.ownerId === currentUser?.id && <div className="flex shrink-0 flex-col gap-0.5">
                         <button type="button" title={chat.isPinned ? "Desafixar conversa" : "Fixar conversa"} aria-label={chat.isPinned ? "Desafixar conversa" : "Fixar conversa"} onClick={() => updateChat.mutate({ chatId: chat.id, preference: { isPinned: !chat.isPinned } })} className="rounded p-1.5 text-[#8696a0] hover:bg-[#2a3942] hover:text-white">
                           <Pin size={12} />
                         </button>
@@ -393,7 +399,7 @@ export function WhatsAppPage() {
                         <button type="button" title={chat.isArchived ? "Desarquivar conversa" : "Arquivar conversa"} aria-label={chat.isArchived ? "Desarquivar conversa" : "Arquivar conversa"} onClick={() => updateChat.mutate({ chatId: chat.id, preference: { isArchived: !chat.isArchived } })} className="rounded p-1.5 text-[#8696a0] hover:bg-[#2a3942] hover:text-white">
                           {chat.isArchived ? <Check size={12} /> : <Archive size={12} />}
                         </button>
-                      </div>
+                      </div>}
                     </div>
                   </li>
                 );
@@ -412,12 +418,13 @@ export function WhatsAppPage() {
                   <div className="min-w-0">
                     <h2 className="truncate text-sm font-semibold text-[#e9edef]">{activeChat.lead?.name ?? contactPhone(activeChat.remoteJid)}</h2>
                     <p className="mt-0.5 truncate text-[11px] text-[#aebac1]">{activeChat.lead?.phone ?? contactPhone(activeChat.remoteJid)}</p>
+                    {!canWrite && <p className="mt-0.5 truncate text-[10px] text-[#8696a0]">Somente leitura · {activeChat.instance.owner?.name ?? "Histórico anterior"}</p>}
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                   {activeChat.lead && <Link className="rounded-lg px-2.5 py-2 text-[10px] font-semibold text-[#aebac1] hover:bg-[#2a3942] hover:text-white sm:text-xs" to="/admin/funil">Ver no funil</Link>}
-                  <button type="button" title={activeChat.isStarred ? "Remover dos favoritos" : "Adicionar aos favoritos"} aria-label={activeChat.isStarred ? "Remover dos favoritos" : "Adicionar aos favoritos"} onClick={() => updateChat.mutate({ chatId: activeChat.id, preference: { isStarred: !activeChat.isStarred } })} className={`rounded-full p-2 transition hover:bg-[#2a3942] ${activeChat.isStarred ? "text-amber-400" : "text-[#aebac1] hover:text-white"}`}><Star size={18} className={activeChat.isStarred ? "fill-current" : ""} /></button>
-                  <button type="button" title={activeChat.isArchived ? "Desarquivar conversa" : "Arquivar conversa"} aria-label={activeChat.isArchived ? "Desarquivar conversa" : "Arquivar conversa"} onClick={() => updateChat.mutate({ chatId: activeChat.id, preference: { isArchived: !activeChat.isArchived } })} className="rounded-full p-2 text-[#aebac1] transition hover:bg-[#2a3942] hover:text-white">{activeChat.isArchived ? <Check size={18} /> : <Archive size={18} />}</button>
+                  {canWrite && <button type="button" title={activeChat.isStarred ? "Remover dos favoritos" : "Adicionar aos favoritos"} aria-label={activeChat.isStarred ? "Remover dos favoritos" : "Adicionar aos favoritos"} onClick={() => updateChat.mutate({ chatId: activeChat.id, preference: { isStarred: !activeChat.isStarred } })} className={`rounded-full p-2 transition hover:bg-[#2a3942] ${activeChat.isStarred ? "text-amber-400" : "text-[#aebac1] hover:text-white"}`}><Star size={18} className={activeChat.isStarred ? "fill-current" : ""} /></button>}
+                  {canWrite && <button type="button" title={activeChat.isArchived ? "Desarquivar conversa" : "Arquivar conversa"} aria-label={activeChat.isArchived ? "Desarquivar conversa" : "Arquivar conversa"} onClick={() => updateChat.mutate({ chatId: activeChat.id, preference: { isArchived: !activeChat.isArchived } })} className="rounded-full p-2 text-[#aebac1] transition hover:bg-[#2a3942] hover:text-white">{activeChat.isArchived ? <Check size={18} /> : <Archive size={18} />}</button>}
                 </div>
               </header>
               <div className="whatsapp-wallpaper flex-1 space-y-2 overflow-y-auto px-3 py-5 sm:px-6 lg:px-10">
@@ -431,7 +438,7 @@ export function WhatsAppPage() {
                       <p>{message.content}</p>
                       {message.reaction && <span className="mt-1 inline-block rounded-full bg-[#111b21] px-2 py-0.5 text-xs shadow">{message.reaction}</span>}
                       <p className="mt-1 text-right text-[9px] text-[#aebac1]">{timeLabel(message.createdAt)}{message.fromMe ? ` · ${message.status}` : ""}</p>
-                      {!message.isDeleted && (
+                      {canWrite && !message.isDeleted && (
                         <div className="mt-1 flex items-center justify-end gap-1 border-t border-white/10 pt-1">
                           <button type="button" aria-label="Responder a esta mensagem" title="Responder" onClick={() => setReplyTo(message)} className="rounded p-1 text-[#aebac1] hover:bg-white/10 hover:text-white"><Reply size={13} /></button>
                           <button type="button" aria-label="Encaminhar mensagem" title="Encaminhar" onClick={() => { setForwardingMessage(message); setForwardTarget(""); }} className="rounded p-1 text-[#aebac1] hover:bg-white/10 hover:text-white"><Forward size={13} /></button>
@@ -456,7 +463,7 @@ export function WhatsAppPage() {
                 ))}
                 <div ref={bottomRef} />
               </div>
-              <form className="border-t border-[#202c33] bg-[#202c33] p-2.5 sm:px-4 sm:py-3" onSubmit={(event) => {
+              {canWrite ? <form className="border-t border-[#202c33] bg-[#202c33] p-2.5 sm:px-4 sm:py-3" onSubmit={(event) => {
                 event.preventDefault();
                 if (text.trim() && !send.isPending && !sendMedia.isPending) send.mutate();
               }}>
@@ -465,7 +472,7 @@ export function WhatsAppPage() {
                   <span className="max-w-40 truncate text-[#aebac1]">{forwardingMessage.content}</span>
                   <select className="min-w-40 flex-1 rounded-lg border border-[#2a3942] bg-[#202c33] px-2 py-1.5 text-[#e9edef]" aria-label="Conversa de destino" value={forwardTarget} onChange={(event) => setForwardTarget(event.target.value)}>
                     <option value="">Selecione a conversa</option>
-                    {chats.data?.filter((chat) => chat.id !== selectedChat).map((chat) => (
+                    {chats.data?.filter((chat) => chat.id !== selectedChat && chat.instance.ownerId === currentUser?.id).map((chat) => (
                       <option key={chat.id} value={chat.id}>{chat.lead?.name ?? contactPhone(chat.remoteJid)}</option>
                     ))}
                   </select>
@@ -492,7 +499,7 @@ export function WhatsAppPage() {
                   </Button>
                 </div>
                 {send.isError && <p className="mt-2 px-2 text-xs text-red-300" role="alert">{errorMessage(send.error)}</p>}
-              </form>
+              </form> : <p className="border-t border-[#202c33] bg-[#202c33] p-4 text-center text-xs text-[#aebac1]">Esta conversa está disponível somente para leitura.</p>}
             </>
           ) : (
             <div className="whatsapp-wallpaper hidden flex-1 flex-col items-center justify-center p-8 text-center md:flex">

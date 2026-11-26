@@ -20,9 +20,12 @@ type Session = {
 };
 type LeadSource = { id: string; value: string };
 type Seller = { id: string; name: string };
+type CatalogMotorcycle = { id: string; brand: string; model: string; version?: string | null; year: string };
+type CatalogPage = { items: CatalogMotorcycle[]; pagination: { pages: number } };
 
 const leadSchema = z.object({
   sellerId: z.string(),
+  motorcycleId: z.string(),
   name: z.string().trim().min(2, "Informe seu nome completo.").max(120),
   phone: z.string().trim().min(10, "Informe seu telefone com DDD.").max(30),
   email: z.string().trim().min(1, "Informe seu e-mail.").email("Informe um e-mail válido.").max(254),
@@ -58,9 +61,22 @@ export function LeadCreatePage() {
     queryFn: async () => (await api.get<{ items: Seller[] }>("/sellers")).data.items,
     enabled: auth.isSuccess && isAdmin,
   });
+  const motorcycles = useQuery({
+    queryKey: ["lead-catalog-motorcycles"],
+    queryFn: async () => {
+      const first = (await api.get<CatalogPage>("/public/motorcycles", { params: { page: 1, limit: 48 } })).data;
+      const items = [...first.items];
+      for (let page = 2; page <= first.pagination.pages; page += 1) {
+        const next = (await api.get<CatalogPage>("/public/motorcycles", { params: { page, limit: 48 } })).data;
+        items.push(...next.items);
+      }
+      return items.sort((a, b) => `${a.brand} ${a.model} ${a.version ?? ""} ${a.year}`.localeCompare(`${b.brand} ${b.model} ${b.version ?? ""} ${b.year}`, "pt-BR", { numeric: true }));
+    },
+    enabled: auth.isSuccess && ["ADMIN", "SELLER"].includes(currentUser?.role ?? ""),
+  });
   const form = useForm<LeadValues>({
     resolver: zodResolver(leadSchema),
-    defaultValues: { sellerId: "", name: "", phone: "", email: "", bestContactTime: "", message: "", originId: "" },
+    defaultValues: { sellerId: "", motorcycleId: "", name: "", phone: "", email: "", bestContactTime: "", message: "", originId: "" },
   });
   useEffect(() => {
     if (auth.isError) void navigate({ to: "/login" });
@@ -72,6 +88,7 @@ export function LeadCreatePage() {
   const createLead = useMutation({
     mutationFn: async (values: LeadValues) => api.post("/leads/manual", {
       ...(isAdmin ? { sellerId: values.sellerId } : {}),
+      ...(values.motorcycleId ? { motorcycleId: values.motorcycleId } : {}),
       name: values.name,
       phone: values.phone,
       email: values.email,
@@ -82,6 +99,7 @@ export function LeadCreatePage() {
     onSuccess: async () => {
       await Promise.all([
         cache.invalidateQueries({ queryKey: ["leads"] }),
+        cache.invalidateQueries({ queryKey: ["kanban-leads"] }),
         cache.invalidateQueries({ queryKey: ["crm-overview"] }),
         cache.invalidateQueries({ queryKey: ["crm-report"] }),
       ]);
@@ -159,6 +177,16 @@ export function LeadCreatePage() {
               {form.formState.errors.originId && <span className="field-error">{form.formState.errors.originId.message}</span>}
               {sources.isError && <span className="field-error" role="alert">{errorMessage(sources.error)}</span>}
               {sources.isSuccess && sources.data.length === 0 && <span className="field-error">Cadastre origens em Configurações antes de incluir um lead.</span>}
+            </label>
+            <label className="field-label sm:col-span-2">Motocicleta desejada <span className="font-normal text-muted">(opcional)</span>
+              <select className="field-input" {...form.register("motorcycleId")} disabled={motorcycles.isLoading || motorcycles.isError}>
+                <option value="">{motorcycles.isLoading ? "Carregando motocicletas..." : "Selecione uma motocicleta"}</option>
+                {motorcycles.data?.map((motorcycle) => (
+                  <option key={motorcycle.id} value={motorcycle.id}>{motorcycle.brand} {motorcycle.model}{motorcycle.version ? ` ${motorcycle.version}` : ""} — {motorcycle.year}</option>
+                ))}
+              </select>
+              {motorcycles.isError && <span className="field-error" role="alert">Não foi possível carregar as motocicletas: {errorMessage(motorcycles.error)}</span>}
+              {motorcycles.isSuccess && motorcycles.data.length === 0 && <span className="text-xs font-normal text-muted">Não há motocicletas disponíveis no catálogo.</span>}
             </label>
             <label className="field-label sm:col-span-2">Como podemos ajudar? <span className="font-normal text-muted">(opcional)</span>
               <textarea className="field-input min-h-28 resize-y" {...form.register("message")} placeholder="Anotações ou informações compartilhadas pelo lead" />

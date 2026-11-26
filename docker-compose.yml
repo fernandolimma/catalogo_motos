@@ -126,6 +126,7 @@ services:
       dockerfile: apps/web/Dockerfile
       args:
         VITE_API_URL: ${VITE_API_URL:-http://localhost:3001/api/v1}
+        VITE_GTM_ID: ${VITE_GTM_ID:-}
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:80"

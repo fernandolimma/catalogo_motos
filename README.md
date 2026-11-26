@@ -35,6 +35,8 @@ O acesso automatizado à referência pública visual apresentou somente a tela d
    docker compose up --build
    ```
 
+   Os builds usam `npm ci` e o `package-lock.json` versionado para instalar as mesmas versões de dependências. Após alterar as dependências, atualize o lockfile com `npm install` antes de gerar as imagens.
+
    O PostgreSQL aguarda health check. A API aplica migrações e cria/atualiza o administrador inicial a partir das variáveis de ambiente antes de iniciar. Os dados ficam no volume `postgres_data`.
 
    As portas do banco, API e frontend são publicadas apenas em `127.0.0.1`; um proxy reverso no host pode encaminhar tráfego para `8080` e `3001` sem expor o PostgreSQL à rede.
@@ -84,15 +86,22 @@ Para desligar sem apagar os dados: `docker compose down`. **Não** use `docker c
 | `API_PORT`, `API_HOST` | Porta e endereço de bind da API. |
 | `WEB_ORIGIN` | Origens exatas autorizadas no CORS, separadas por vírgula. Também é verificada nas operações autenticadas que alteram dados. |
 | `VITE_API_URL` | URL pública da API embutida no build do frontend. Em produção, use a URL HTTPS pública. |
+| `VITE_GTM_ID` | ID público do Google Tag Manager (`GTM-XXXXXXX`), embutido no build do frontend. Vazio mantém a integração desativada. |
 | `JWT_SECRET` | Segredo da sessão; mínimo de 32 caracteres em produção. Gere um valor aleatório e exclusivo. |
 | `COOKIE_SECURE` | Defina `true` em HTTPS. Em desenvolvimento local, `false`. |
 | `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Credenciais do administrador criado pelo seed. A senha precisa de pelo menos 12 caracteres. O seed atualiza o usuário para refletir essas variáveis. |
 | `SEED_DEMO_DATA` | `true` cria uma única motocicleta DEMO não publicada e indisponível; padrão `false`. |
-| `WHATSAPP_PROVIDER`, `EVOLUTION_API_URL`, `EVOLUTION_API_KEY`, `EVOLUTION_INSTANCE`, `EVOLUTION_WEBHOOK_SECRET`, `EVOLUTION_POSTGRES_PASSWORD` | API, instância, autenticação do webhook e banco isolado da Evolution API. Use segredos aleatórios diferentes; no Docker, a URL interna padrão é `http://evolution:8080`. |
+| `WHATSAPP_PROVIDER`, `EVOLUTION_API_URL`, `EVOLUTION_API_KEY`, `EVOLUTION_INSTANCE`, `EVOLUTION_WEBHOOK_SECRET`, `EVOLUTION_POSTGRES_PASSWORD` | API, configuração legada, autenticação do webhook e banco isolado da Evolution API. As novas instâncias do chat são individuais e não usam `EVOLUTION_INSTANCE`. Use segredos aleatórios diferentes; no Docker, a URL interna padrão é `http://evolution:8080`. |
 | `EMAIL_PROVIDER`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | Configuração do envio de e-mails via SMTP. O adaptador está preparado, mas o disparo real é bloqueado até decisão de produção. |
 | `STORAGE_PROVIDER`, `S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | Preparação para armazenamento de mídia/imagens. Ainda não está habilitado em produção. |
 
 O arquivo `.env.example` contém apenas valores demonstrativos. Não o use como configuração de produção.
+
+### Google Tag Manager
+
+Para ativar o GTM no catálogo público, defina `VITE_GTM_ID` no `.env` e reconstrua a imagem web. O contêiner só é carregado após o visitante aceitar os cookies de medição; a escolha pode ser alterada no rodapé. Ao recusar após aceitar, a página é recarregada para interromper os scripts; cookies já criados por terceiros não são removidos automaticamente. O login e o CRM não carregam o contêiner.
+
+O GTM é uma aplicação de página única: configure no próprio contêiner as tags, os eventos e a medição de navegação desejados, evitando enviar dados pessoais, parâmetros sensíveis ou conteúdo de formulários. Antes de ativar tags, revise o aviso de privacidade e suas configurações de consentimento e compartilhamento de dados.
 
 ## Funcionalidades disponíveis
 
@@ -110,7 +119,7 @@ O arquivo `.env.example` contém apenas valores demonstrativos. Não o use como 
 - Login com cookie JWT `HttpOnly`, `SameSite=Strict`, senha bcrypt e bloqueio temporário após tentativas inválidas.
 - Administração exclusiva para ADMIN em `/admin/usuarios`: criar contas, definir perfis, vincular vendedores, redefinir senhas e bloquear/reativar acessos; mudanças de senha, perfil ou status revogam tokens anteriores.
 - Tela `/admin/configuracoes` exclusiva para ADMIN cadastrar opções de grupo, modelo, categoria, ano (inclusive formatos como `26/27`), versão e origem de leads.
-- Cadastro manual de leads para ADMIN e SELLER em `/admin/leads/cadastrar`, vinculado ao vendedor responsável e a uma origem configurada; leads entram no funil na etapa inicial.
+- Cadastro manual de leads para ADMIN e SELLER em `/admin/leads/cadastrar`, vinculado ao vendedor responsável e a uma origem configurada; é possível selecionar uma motocicleta disponível no catálogo para exibi-la no funil.
 - Painel administrativo com barra lateral responsiva para navegar entre dashboard, funil Kanban, estoque e contas; opções de gestão aparecem conforme o perfil autenticado.
 - Perfis iniciais e restrição de vendedor aos próprios leads no backend.
 - Lista paginada de leads, busca, filtro de etapa, ficha e histórico; anotações e atualização auditada do funil.
@@ -166,10 +175,16 @@ O Docker Compose executa a Evolution API `v2.3.7` com banco PostgreSQL, Redis e 
 
 1. Gere valores aleatórios diferentes para `EVOLUTION_API_KEY`, `EVOLUTION_WEBHOOK_SECRET` e `EVOLUTION_POSTGRES_PASSWORD` no `.env`.
 2. Suba os serviços com `docker compose up --build -d`.
-3. Entre no CRM como administrador, abra **WhatsApp** e selecione **Conectar WhatsApp**.
+3. Cada usuário entra no CRM, abre **WhatsApp** e seleciona **Conectar** para vincular seu próprio número.
 4. No telefone, acesse **Aparelhos conectados** e leia o QR Code. A sessão e as conversas ficam persistidas nos volumes Docker.
 
-A Evolution salva mensagens e entrega eventos ao webhook autenticado do CRM. Administradores, supervisores e gerentes visualizam todas as conversas; vendedores visualizam as conversas associadas aos leads atribuídos a eles. A caixa de entrada permite pesquisar contatos e conteúdo das mensagens, filtrar conversas não lidas, favoritas ou arquivadas, além de fixar, favoritar, silenciar e arquivar conversas. Ao abrir uma conversa, as mensagens recebidas são marcadas como lidas. As preferências ficam salvas no banco do CRM. O chat suporta texto e, nesta segunda etapa, envio de imagens, vídeos, áudios e documentos de até 8 MB, visualização sob demanda de mídia recebida, respostas citadas, reações, edição de texto enviado, remoção para todos e reencaminhamento para outra conversa. O reencaminhamento é feito como novo envio, pois a Evolution não fornece uma operação nativa de encaminhamento. Gerenciamento de contatos e grupos permanece para a etapa seguinte.
+A Evolution salva mensagens e entrega eventos ao webhook autenticado do CRM. Cada usuário acessa e responde às conversas do seu próprio número, inclusive quando não estão associadas a um lead. Administradores, supervisores e gerentes também visualizam as conversas dos demais usuários, somente para leitura. As conversas da antiga instância compartilhada permanecem em um histórico sem proprietário, visível somente aos administradores e sem envio de mensagens. Para atender um lead pelo próprio número, abra uma nova conversa a partir do funil; o histórico antigo não é transferido nem mesclado.
+
+A caixa de entrada permite pesquisar contatos e conteúdo das mensagens, filtrar conversas não lidas, favoritas ou arquivadas, além de fixar, favoritar, silenciar e arquivar conversas próprias. Ao abrir uma conversa própria, as mensagens recebidas são marcadas como lidas; a consulta de conversas de outros usuários não altera seu estado. As preferências ficam salvas no banco do CRM. O chat suporta texto, envio de imagens, vídeos, áudios e documentos de até 8 MB, visualização sob demanda de mídia recebida, respostas citadas, reações, edição de texto enviado, remoção para todos e reencaminhamento entre conversas do próprio número. O reencaminhamento é feito como novo envio, pois a Evolution não fornece uma operação nativa de encaminhamento. Gerenciamento de contatos e grupos permanece para a etapa seguinte.
+
+As atividades automáticas de mensagens exibidas na ficha do lead respeitam as mesmas permissões do chat. A sessão compartilhada antiga não é desconectada automaticamente; enquanto permanecer ativa, seus eventos continuarão no histórico antigo.
+
+Os testes de integração de WhatsApp, usuários e leads usam exclusivamente um banco PostgreSQL de testes chamado `catalogo_whatsapp_test`, com as migrações aplicadas. Defina `WHATSAPP_TEST_DATABASE_URL` com a URL desse banco antes de executar os testes da API; sem essa variável, esses testes são ignorados. Não use um banco com dados reais.
 
 ## Backup e restauração
 

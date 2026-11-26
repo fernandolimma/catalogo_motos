@@ -22,20 +22,40 @@ function isRecord(value: unknown): value is JsonRecord {
 function evolutionConfig() {
   const baseUrl = process.env.EVOLUTION_API_URL?.trim().replace(/\/+$/, "");
   const apiKey = process.env.EVOLUTION_API_KEY?.trim();
-  const instance = process.env.EVOLUTION_INSTANCE?.trim() || "catalogo-motos";
   if (!baseUrl || !apiKey) {
     throw new EvolutionError("Configure EVOLUTION_API_URL e EVOLUTION_API_KEY no ambiente da API.", 503, "not_configured");
   }
-  return { baseUrl, apiKey, instance };
+  return { baseUrl, apiKey };
 }
 
-async function evolutionRequest(path: string, init?: RequestInit) {
+function readableConversations(user: { sub: string; role: string }): Prisma.ConversationWhereInput {
+  if (user.role === UserRole.ADMIN) return {};
+  if (user.role === UserRole.SUPERVISOR || user.role === UserRole.MANAGER) {
+    return { instance: { ownerId: { not: null } } };
+  }
+  return { instance: { ownerId: user.sub } };
+}
+
+function writableConversations(user: { sub: string }): Prisma.ConversationWhereInput {
+  return { instance: { ownerId: user.sub } };
+}
+
+async function userInstance(userId: string) {
+  return prisma.whatsAppInstance.upsert({
+    where: { ownerId: userId },
+    create: { name: `catalogo-user-${userId}`, ownerId: userId },
+    update: {},
+    select: { id: true, name: true },
+  });
+}
+
+async function evolutionRequest(path: string, init?: RequestInit, timeoutMs = 12_000) {
   const { baseUrl, apiKey } = evolutionConfig();
   let response: Response;
   try {
     response = await fetch(`${baseUrl}${path}`, {
       ...init,
-      signal: AbortSignal.timeout(12_000),
+      signal: AbortSignal.timeout(timeoutMs),
       headers: {
         apikey: apiKey,
         ...(init?.body ? { "content-type": "application/json" } : {}),
@@ -250,7 +270,7 @@ async function getOrCreateLeadConversation(
   return { id: canonical.id, leadId };
 }
 
-async function saveMessage(instanceName: string, rawMessage: unknown, userId?: string) {
+async function saveMessage(instanceId: string, rawMessage: unknown) {
   if (!isRecord(rawMessage) || !isRecord(rawMessage.key)) return;
   const key = rawMessage.key;
   const remoteJid = typeof key.remoteJid === "string" ? key.remoteJid : "";
@@ -274,17 +294,11 @@ async function saveMessage(instanceName: string, rawMessage: unknown, userId?: s
     })
     : null;
 
-  const instance = await prisma.whatsAppInstance.upsert({
-    where: { name: instanceName },
-    create: { name: instanceName, isActive: true, lastCheckedAt: new Date() },
-    update: { isActive: true, lastCheckedAt: new Date() },
-    select: { id: true },
-  });
   const conversation = lead
-    ? await getOrCreateLeadConversation(instance.id, lead.id, phone ?? remoteJid, remoteJid)
+    ? await getOrCreateLeadConversation(instanceId, lead.id, phone ?? remoteJid, remoteJid)
     : await prisma.conversation.upsert({
-      where: { instanceId_remoteJid: { instanceId: instance.id, remoteJid } },
-      create: { instanceId: instance.id, remoteJid },
+      where: { instanceId_remoteJid: { instanceId, remoteJid } },
+      create: { instanceId, remoteJid },
       update: { updatedAt: new Date() },
       select: { id: true, leadId: true },
     });
@@ -317,9 +331,9 @@ async function saveMessage(instanceName: string, rawMessage: unknown, userId?: s
       await tx.leadActivity.create({
         data: {
           leadId: conversation.leadId,
-          userId,
           type: ActivityType.WHATSAPP,
           content: `${fromMe ? "Mensagem enviada" : "Mensagem recebida"} pelo WhatsApp: ${content}`,
+          metadata: { source: "whatsapp-webhook", instanceId },
         },
       });
     }
@@ -340,17 +354,18 @@ function validWebhookSecret(request: { headers: Record<string, string | string[]
 
 export async function whatsappRoutes(app: FastifyInstance) {
   app.get("/whatsapp/status", {
-    preHandler: allowRoles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.MANAGER, UserRole.SELLER),
+    preHandler: allowRoles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.MANAGER, UserRole.SELLER, UserRole.SUPPORT),
     schema: { tags: ["whatsapp"], summary: "Consultar conexão do WhatsApp", security: [{ sessionCookie: [] }] },
-  }, async (_request, reply) => {
+  }, async (request, reply) => {
     try {
-      const { instance } = evolutionConfig();
-      const response = await evolutionRequest(evolutionPath("instance/connectionState", instance));
+      evolutionConfig();
+      const instance = await prisma.whatsAppInstance.findUnique({ where: { ownerId: request.user.sub } });
+      if (!instance) return reply.send({ configured: true, state: "close" });
+      const response = await evolutionRequest(evolutionPath("instance/connectionState", instance.name));
       const state = stateFrom(response);
-      await prisma.whatsAppInstance.upsert({
-        where: { name: instance },
-        create: { name: instance, isActive: state === "open", lastCheckedAt: new Date() },
-        update: { isActive: state === "open", lastCheckedAt: new Date() },
+      await prisma.whatsAppInstance.update({
+        where: { id: instance.id },
+        data: { isActive: state === "open", lastCheckedAt: new Date() },
       });
       return reply.send({ configured: true, state });
     } catch (error) {
@@ -365,15 +380,16 @@ export async function whatsappRoutes(app: FastifyInstance) {
   });
 
   app.post("/whatsapp/connect", {
-    preHandler: allowRoles(UserRole.ADMIN),
+    preHandler: allowRoles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.MANAGER, UserRole.SELLER, UserRole.SUPPORT),
     schema: { tags: ["whatsapp"], summary: "Conectar instância do WhatsApp", security: [{ sessionCookie: [] }] },
-  }, async (_request, reply) => {
-    const { instance } = evolutionConfig();
+  }, async (request, reply) => {
+    const account = await userInstance(request.user.sub);
+    const instance = account.name;
     let response: unknown;
     try {
-      response = await evolutionRequest(evolutionPath("instance/connectionState", instance));
+      response = await evolutionRequest(evolutionPath("instance/connectionState", instance), undefined, 45_000);
       if (stateFrom(response) === "open") return reply.send({ state: "open" });
-      response = await evolutionRequest(evolutionPath("instance/connect", instance));
+      response = await evolutionRequest(evolutionPath("instance/connect", instance), undefined, 45_000);
     } catch (error) {
       if (!(error instanceof EvolutionError) || error.code !== "instance_not_found") throw error;
       const webhookSecret = process.env.EVOLUTION_WEBHOOK_SECRET;
@@ -396,15 +412,14 @@ export async function whatsappRoutes(app: FastifyInstance) {
             events: ["MESSAGES_UPSERT", "CONNECTION_UPDATE"],
           },
         }),
-      });
+      }, 45_000);
     }
     const data = isRecord(response) ? response : {};
     const state = stateFrom(data);
     const qr = connectionQrFrom(data);
-    await prisma.whatsAppInstance.upsert({
-      where: { name: instance },
-      create: { name: instance, isActive: state === "open", lastCheckedAt: new Date() },
-      update: { isActive: state === "open", lastCheckedAt: new Date() },
+    await prisma.whatsAppInstance.update({
+      where: { id: account.id },
+      data: { isActive: state === "open", lastCheckedAt: new Date() },
     });
     return reply.send({
       state,
@@ -425,16 +440,15 @@ export async function whatsappRoutes(app: FastifyInstance) {
     }
     const event = typeof payload.data.event === "string" ? payload.data.event.toUpperCase().replaceAll(".", "_") : "";
     const instance = typeof payload.data.instance === "string" ? payload.data.instance : "";
-    const configuredInstance = process.env.EVOLUTION_INSTANCE?.trim() || "catalogo-motos";
-    if (instance !== configuredInstance) return reply.code(202).send({ received: true });
+    const account = await prisma.whatsAppInstance.findUnique({ where: { name: instance }, select: { id: true } });
+    if (!account) return reply.code(202).send({ received: true });
 
     if (event === "CONNECTION_UPDATE") {
       const data = isRecord(payload.data.data) ? payload.data.data : {};
       const state = typeof data.state === "string" ? data.state.toLowerCase() : "";
-      await prisma.whatsAppInstance.upsert({
-        where: { name: instance },
-        create: { name: instance, isActive: state === "open", lastCheckedAt: new Date() },
-        update: { isActive: state === "open", lastCheckedAt: new Date() },
+      await prisma.whatsAppInstance.update({
+        where: { id: account.id },
+        data: { isActive: state === "open", lastCheckedAt: new Date() },
       });
     } else if (event === "MESSAGES_UPSERT") {
       const data = payload.data.data;
@@ -443,29 +457,22 @@ export async function whatsappRoutes(app: FastifyInstance) {
         : isRecord(data) && Array.isArray(data.messages)
           ? data.messages
           : [data];
-      for (const message of messages) await saveMessage(instance, message, request.user?.sub);
+      for (const message of messages) await saveMessage(account.id, message);
     }
     return reply.code(200).send({ received: true });
   });
 
   app.get("/whatsapp/chats", {
-    preHandler: allowRoles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.MANAGER, UserRole.SELLER),
+    preHandler: allowRoles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.MANAGER, UserRole.SELLER, UserRole.SUPPORT),
     schema: { tags: ["whatsapp"], summary: "Listar conversas do WhatsApp", security: [{ sessionCookie: [] }] },
   }, async (request, reply) => {
     const query = z.object({
       q: z.string().trim().max(100).optional(),
       filter: z.enum(["all", "unread", "archived", "starred"]).default("all"),
     }).parse(request.query);
-    const instanceName = process.env.EVOLUTION_INSTANCE?.trim() || "catalogo-motos";
-    const instance = await prisma.whatsAppInstance.findUnique({ where: { name: instanceName }, select: { id: true } });
-    if (!instance) return reply.send({ items: [] });
-    const sellerId = request.user.role === UserRole.SELLER
-      ? (await prisma.seller.findUnique({ where: { userId: request.user.sub }, select: { id: true } }))?.id ?? "00000000-0000-0000-0000-000000000000"
-      : undefined;
     const items = await prisma.conversation.findMany({
       where: {
-        instanceId: instance.id,
-        ...(sellerId ? { lead: { sellerId } } : {}),
+        ...readableConversations(request.user),
         ...(query.filter === "archived" ? { isArchived: true } : query.filter === "all" ? { isArchived: false } : {}),
         ...(query.filter === "starred" ? { isStarred: true, isArchived: false } : {}),
         ...(query.filter === "unread" ? { messages: { some: { isRead: false, fromMe: false } }, isArchived: false } : {}),
@@ -480,6 +487,7 @@ export async function whatsappRoutes(app: FastifyInstance) {
       },
       orderBy: [{ isPinned: "desc" }, { updatedAt: "desc" }],
       include: {
+        instance: { select: { ownerId: true, owner: { select: { name: true } } } },
         lead: { select: { id: true, name: true, phone: true, sellerId: true } },
         messages: {
           orderBy: { createdAt: "desc" },
@@ -504,11 +512,11 @@ export async function whatsappRoutes(app: FastifyInstance) {
   });
 
   app.post("/whatsapp/leads/:leadId/chat", {
-    preHandler: allowRoles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.MANAGER, UserRole.SELLER),
+    preHandler: allowRoles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.MANAGER, UserRole.SELLER, UserRole.SUPPORT),
     schema: { tags: ["whatsapp"], summary: "Abrir ou iniciar conversa do WhatsApp de um lead", security: [{ sessionCookie: [] }] },
   }, async (request, reply) => {
     const { leadId } = z.object({ leadId: z.string().uuid() }).parse(request.params);
-    const sellerId = request.user.role === UserRole.SELLER
+    const sellerId = request.user.role === UserRole.SELLER || request.user.role === UserRole.SUPPORT
       ? (await prisma.seller.findUnique({ where: { userId: request.user.sub }, select: { id: true } }))?.id ?? "00000000-0000-0000-0000-000000000000"
       : undefined;
     const lead = await prisma.lead.findFirst({
@@ -520,13 +528,7 @@ export async function whatsappRoutes(app: FastifyInstance) {
     if (!phone) {
       return reply.code(400).send({ error: "invalid_recipient", message: "O telefone deste Lead não pode ser usado no WhatsApp." });
     }
-    const instanceName = process.env.EVOLUTION_INSTANCE?.trim() || "catalogo-motos";
-    const instance = await prisma.whatsAppInstance.upsert({
-      where: { name: instanceName },
-      create: { name: instanceName },
-      update: {},
-      select: { id: true },
-    });
+    const instance = await userInstance(request.user.sub);
     const number = phone.startsWith("55") ? phone : `55${phone}`;
     const leadConversation = await getOrCreateLeadConversation(
       instance.id,
@@ -538,6 +540,7 @@ export async function whatsappRoutes(app: FastifyInstance) {
     const conversation = await prisma.conversation.findUniqueOrThrow({
       where: { id: leadConversation.id },
       include: {
+        instance: { select: { ownerId: true, owner: { select: { name: true } } } },
         lead: { select: { id: true, name: true, phone: true, sellerId: true } },
         messages: {
           orderBy: { createdAt: "desc" },
@@ -562,15 +565,12 @@ export async function whatsappRoutes(app: FastifyInstance) {
   });
 
   app.get("/whatsapp/chats/:id/messages", {
-    preHandler: allowRoles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.MANAGER, UserRole.SELLER),
+    preHandler: allowRoles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.MANAGER, UserRole.SELLER, UserRole.SUPPORT),
     schema: { tags: ["whatsapp"], summary: "Listar mensagens da conversa", security: [{ sessionCookie: [] }] },
   }, async (request, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params);
-    const sellerId = request.user.role === UserRole.SELLER
-      ? (await prisma.seller.findUnique({ where: { userId: request.user.sub }, select: { id: true } }))?.id ?? "00000000-0000-0000-0000-000000000000"
-      : undefined;
     const conversation = await prisma.conversation.findFirst({
-      where: { id, ...(sellerId ? { lead: { sellerId } } : {}) },
+      where: { id, ...readableConversations(request.user) },
       select: { id: true },
     });
     if (!conversation) return reply.code(404).send({ error: "not_found", message: "Conversa não encontrada." });
@@ -597,21 +597,18 @@ export async function whatsappRoutes(app: FastifyInstance) {
   });
 
   app.get("/whatsapp/chats/:id/messages/:messageId/media", {
-    preHandler: allowRoles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.MANAGER, UserRole.SELLER),
+    preHandler: allowRoles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.MANAGER, UserRole.SELLER, UserRole.SUPPORT),
     schema: { tags: ["whatsapp"], summary: "Obter mídia de uma mensagem", security: [{ sessionCookie: [] }] },
   }, async (request, reply) => {
     const { id, messageId } = z.object({ id: z.string().uuid(), messageId: z.string().uuid() }).parse(request.params);
-    const sellerId = request.user.role === UserRole.SELLER
-      ? (await prisma.seller.findUnique({ where: { userId: request.user.sub }, select: { id: true } }))?.id ?? "00000000-0000-0000-0000-000000000000"
-      : undefined;
     const message = await prisma.message.findFirst({
-      where: { id: messageId, conversationId: id, ...(sellerId ? { conversation: { lead: { sellerId } } } : {}) },
-      select: { providerPayload: true, mediaType: true, mimeType: true, fileName: true },
+      where: { id: messageId, conversationId: id, conversation: readableConversations(request.user) },
+      select: { providerPayload: true, mediaType: true, mimeType: true, fileName: true, conversation: { select: { instance: { select: { name: true } } } } },
     });
     if (!message?.mediaType || !message.providerPayload) {
       return reply.code(404).send({ error: "media_not_found", message: "Mídia não encontrada para esta mensagem." });
     }
-    const { instance } = evolutionConfig();
+    const instance = message.conversation.instance.name;
     const response = await evolutionRequest(evolutionPath("chat/getBase64FromMediaMessage", instance), {
       method: "POST",
       body: JSON.stringify({ message: message.providerPayload, convertToMp4: false }),
@@ -633,15 +630,12 @@ export async function whatsappRoutes(app: FastifyInstance) {
   });
 
   app.patch("/whatsapp/chats/:id/read", {
-    preHandler: allowRoles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.MANAGER, UserRole.SELLER),
+    preHandler: allowRoles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.MANAGER, UserRole.SELLER, UserRole.SUPPORT),
     schema: { tags: ["whatsapp"], summary: "Marcar conversa como lida", security: [{ sessionCookie: [] }] },
   }, async (request, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params);
-    const sellerId = request.user.role === UserRole.SELLER
-      ? (await prisma.seller.findUnique({ where: { userId: request.user.sub }, select: { id: true } }))?.id ?? "00000000-0000-0000-0000-000000000000"
-      : undefined;
     const conversation = await prisma.conversation.findFirst({
-      where: { id, ...(sellerId ? { lead: { sellerId } } : {}) },
+      where: { id, ...writableConversations(request.user) },
       select: { id: true },
     });
     if (!conversation) return reply.code(404).send({ error: "not_found", message: "Conversa não encontrada." });
@@ -650,7 +644,7 @@ export async function whatsappRoutes(app: FastifyInstance) {
   });
 
   app.patch("/whatsapp/chats/:id/preferences", {
-    preHandler: allowRoles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.MANAGER, UserRole.SELLER),
+    preHandler: allowRoles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.MANAGER, UserRole.SELLER, UserRole.SUPPORT),
     schema: { tags: ["whatsapp"], summary: "Atualizar organização da conversa", security: [{ sessionCookie: [] }] },
   }, async (request, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params);
@@ -660,11 +654,8 @@ export async function whatsappRoutes(app: FastifyInstance) {
       isMuted: z.boolean().optional(),
       isStarred: z.boolean().optional(),
     }).refine((value) => Object.keys(value).length > 0, "Informe ao menos uma preferência.").parse(request.body);
-    const sellerId = request.user.role === UserRole.SELLER
-      ? (await prisma.seller.findUnique({ where: { userId: request.user.sub }, select: { id: true } }))?.id ?? "00000000-0000-0000-0000-000000000000"
-      : undefined;
     const conversation = await prisma.conversation.findFirst({
-      where: { id, ...(sellerId ? { lead: { sellerId } } : {}) },
+      where: { id, ...writableConversations(request.user) },
       select: { id: true },
     });
     if (!conversation) return reply.code(404).send({ error: "not_found", message: "Conversa não encontrada." });
@@ -673,7 +664,7 @@ export async function whatsappRoutes(app: FastifyInstance) {
   });
 
   app.post("/whatsapp/chats/:id/messages", {
-    preHandler: allowRoles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.MANAGER, UserRole.SELLER),
+    preHandler: allowRoles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.MANAGER, UserRole.SELLER, UserRole.SUPPORT),
     schema: { tags: ["whatsapp"], summary: "Enviar mensagem de texto pelo WhatsApp", security: [{ sessionCookie: [] }] },
   }, async (request, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params);
@@ -681,12 +672,9 @@ export async function whatsappRoutes(app: FastifyInstance) {
       text: z.string().trim().min(1).max(4000),
       quotedMessageId: z.string().uuid().optional(),
     }).parse(request.body);
-    const sellerId = request.user.role === UserRole.SELLER
-      ? (await prisma.seller.findUnique({ where: { userId: request.user.sub }, select: { id: true } }))?.id ?? "00000000-0000-0000-0000-000000000000"
-      : undefined;
     const conversation = await prisma.conversation.findFirst({
-      where: { id, ...(sellerId ? { lead: { sellerId } } : {}) },
-      select: { id: true, remoteJid: true, leadId: true },
+      where: { id, ...writableConversations(request.user) },
+      select: { id: true, remoteJid: true, leadId: true, instance: { select: { name: true } } },
     });
     if (!conversation) return reply.code(404).send({ error: "not_found", message: "Conversa não encontrada." });
     const number = conversation.remoteJid.split("@")[0]?.split(":")[0] ?? "";
@@ -707,7 +695,7 @@ export async function whatsappRoutes(app: FastifyInstance) {
       quoted = parts;
       quotedContent = source.content;
     }
-    const { instance } = evolutionConfig();
+    const instance = conversation.instance.name;
     const response = await evolutionRequest(evolutionPath("message/sendText", instance), {
       method: "POST",
       body: JSON.stringify({ number, text, ...(quoted ? { quoted } : {}) }),
@@ -740,7 +728,7 @@ export async function whatsappRoutes(app: FastifyInstance) {
 
   app.post("/whatsapp/chats/:id/media", {
     bodyLimit: 12 * 1024 * 1024,
-    preHandler: allowRoles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.MANAGER, UserRole.SELLER),
+    preHandler: allowRoles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.MANAGER, UserRole.SELLER, UserRole.SUPPORT),
     schema: { tags: ["whatsapp"], summary: "Enviar mídia em uma conversa", security: [{ sessionCookie: [] }] },
   }, async (request, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params);
@@ -762,12 +750,9 @@ export async function whatsappRoutes(app: FastifyInstance) {
     if (base64Bytes.length > 8 * 1024 * 1024 || input.base64.length % 4 !== 0) {
       return reply.code(413).send({ error: "media_too_large", message: "O arquivo deve ter no máximo 8 MB." });
     }
-    const sellerId = request.user.role === UserRole.SELLER
-      ? (await prisma.seller.findUnique({ where: { userId: request.user.sub }, select: { id: true } }))?.id ?? "00000000-0000-0000-0000-000000000000"
-      : undefined;
     const conversation = await prisma.conversation.findFirst({
-      where: { id, ...(sellerId ? { lead: { sellerId } } : {}) },
-      select: { id: true, remoteJid: true },
+      where: { id, ...writableConversations(request.user) },
+      select: { id: true, remoteJid: true, instance: { select: { name: true } } },
     });
     if (!conversation) return reply.code(404).send({ error: "not_found", message: "Conversa não encontrada." });
     const number = conversation.remoteJid.split("@")[0]?.split(":")[0] ?? "";
@@ -796,7 +781,7 @@ export async function whatsappRoutes(app: FastifyInstance) {
           ? "audio"
           : "document";
     const safeFileName = input.fileName.replace(/[\\/:*?"<>|]/g, "_");
-    const { instance } = evolutionConfig();
+    const instance = conversation.instance.name;
     const response = await evolutionRequest(evolutionPath("message/sendMedia", instance), {
       method: "POST",
       body: JSON.stringify({
@@ -841,22 +826,19 @@ export async function whatsappRoutes(app: FastifyInstance) {
 
   app.post("/whatsapp/chats/:id/messages/:messageId/forward", {
     bodyLimit: 12 * 1024 * 1024,
-    preHandler: allowRoles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.MANAGER, UserRole.SELLER),
+    preHandler: allowRoles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.MANAGER, UserRole.SELLER, UserRole.SUPPORT),
     schema: { tags: ["whatsapp"], summary: "Reencaminhar mensagem para outra conversa", security: [{ sessionCookie: [] }] },
   }, async (request, reply) => {
     const { id, messageId } = z.object({ id: z.string().uuid(), messageId: z.string().uuid() }).parse(request.params);
     const { targetChatId } = z.object({ targetChatId: z.string().uuid() }).parse(request.body);
-    const sellerId = request.user.role === UserRole.SELLER
-      ? (await prisma.seller.findUnique({ where: { userId: request.user.sub }, select: { id: true } }))?.id ?? "00000000-0000-0000-0000-000000000000"
-      : undefined;
     const [sourceConversation, targetConversation, sourceMessage] = await Promise.all([
       prisma.conversation.findFirst({
-        where: { id, ...(sellerId ? { lead: { sellerId } } : {}) },
-        select: { id: true },
+        where: { id, ...writableConversations(request.user) },
+        select: { id: true, instanceId: true },
       }),
       prisma.conversation.findFirst({
-        where: { id: targetChatId, ...(sellerId ? { lead: { sellerId } } : {}) },
-        select: { id: true, remoteJid: true },
+        where: { id: targetChatId, ...writableConversations(request.user) },
+        select: { id: true, remoteJid: true, instanceId: true, instance: { select: { name: true } } },
       }),
       prisma.message.findFirst({
         where: { id: messageId, conversationId: id, isDeleted: false },
@@ -864,14 +846,14 @@ export async function whatsappRoutes(app: FastifyInstance) {
       }),
     ]);
     const parts = providerMessageParts(sourceMessage?.providerPayload);
-    if (!sourceConversation || !targetConversation || !sourceMessage || !parts) {
+    if (!sourceConversation || !targetConversation || sourceConversation.instanceId !== targetConversation.instanceId || !sourceMessage || !parts) {
       return reply.code(404).send({ error: "not_found", message: "Mensagem ou conversa de destino não encontrada." });
     }
     const number = targetConversation.remoteJid.split("@")[0]?.split(":")[0] ?? "";
     if (!/^\d{10,13}$/.test(number)) {
       return reply.code(400).send({ error: "invalid_recipient", message: "A conversa de destino não possui um telefone compatível." });
     }
-    const { instance } = evolutionConfig();
+    const instance = targetConversation.instance.name;
     let response: unknown;
     if (sourceMessage.mediaType) {
       const media = await evolutionRequest(evolutionPath("chat/getBase64FromMediaMessage", instance), {
@@ -922,17 +904,14 @@ export async function whatsappRoutes(app: FastifyInstance) {
   });
 
   app.post("/whatsapp/chats/:id/messages/:messageId/reaction", {
-    preHandler: allowRoles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.MANAGER, UserRole.SELLER),
+    preHandler: allowRoles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.MANAGER, UserRole.SELLER, UserRole.SUPPORT),
     schema: { tags: ["whatsapp"], summary: "Reagir a uma mensagem", security: [{ sessionCookie: [] }] },
   }, async (request, reply) => {
     const { id, messageId } = z.object({ id: z.string().uuid(), messageId: z.string().uuid() }).parse(request.params);
     const { reaction } = z.object({ reaction: z.string().max(8).regex(/^(?:|[\p{Extended_Pictographic}\uFE0F\u200D]+)$/u) }).parse(request.body);
-    const sellerId = request.user.role === UserRole.SELLER
-      ? (await prisma.seller.findUnique({ where: { userId: request.user.sub }, select: { id: true } }))?.id ?? "00000000-0000-0000-0000-000000000000"
-      : undefined;
     const conversation = await prisma.conversation.findFirst({
-      where: { id, ...(sellerId ? { lead: { sellerId } } : {}) },
-      select: { id: true, remoteJid: true },
+      where: { id, ...writableConversations(request.user) },
+      select: { id: true, remoteJid: true, instance: { select: { name: true } } },
     });
     const message = conversation ? await prisma.message.findFirst({
       where: { id: messageId, conversationId: id },
@@ -942,7 +921,7 @@ export async function whatsappRoutes(app: FastifyInstance) {
     if (!conversation || !message || !parts || !message.externalId) {
       return reply.code(404).send({ error: "not_found", message: "Mensagem não encontrada ou não pode receber reação." });
     }
-    const { instance } = evolutionConfig();
+    const instance = conversation.instance.name;
     await evolutionRequest(evolutionPath("message/sendReaction", instance), {
       method: "POST",
       body: JSON.stringify({ key: parts.key, reaction }),
@@ -952,14 +931,11 @@ export async function whatsappRoutes(app: FastifyInstance) {
   });
 
   app.patch("/whatsapp/chats/:id/messages/:messageId", {
-    preHandler: allowRoles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.MANAGER, UserRole.SELLER),
+    preHandler: allowRoles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.MANAGER, UserRole.SELLER, UserRole.SUPPORT),
     schema: { tags: ["whatsapp"], summary: "Editar mensagem de texto enviada", security: [{ sessionCookie: [] }] },
   }, async (request, reply) => {
     const { id, messageId } = z.object({ id: z.string().uuid(), messageId: z.string().uuid() }).parse(request.params);
     const { text } = z.object({ text: z.string().trim().min(1).max(4000) }).parse(request.body);
-    const sellerId = request.user.role === UserRole.SELLER
-      ? (await prisma.seller.findUnique({ where: { userId: request.user.sub }, select: { id: true } }))?.id ?? "00000000-0000-0000-0000-000000000000"
-      : undefined;
     const message = await prisma.message.findFirst({
       where: {
         id: messageId,
@@ -967,17 +943,17 @@ export async function whatsappRoutes(app: FastifyInstance) {
         fromMe: true,
         mediaType: null,
         isDeleted: false,
-        ...(sellerId ? { conversation: { lead: { sellerId } } } : {}),
+        conversation: writableConversations(request.user),
       },
-      select: { id: true, externalId: true, providerPayload: true },
+      select: { id: true, externalId: true, providerPayload: true, conversation: { select: { remoteJid: true, instance: { select: { name: true } } } } },
     });
     const parts = providerMessageParts(message?.providerPayload);
     if (!message || !parts || !message.externalId) {
       return reply.code(404).send({ error: "not_found", message: "Mensagem não encontrada ou não pode ser editada." });
     }
-    const conversation = await prisma.conversation.findUniqueOrThrow({ where: { id }, select: { remoteJid: true } });
+    const conversation = message.conversation;
     const number = conversation.remoteJid.split("@")[0]?.split(":")[0] ?? "";
-    const { instance } = evolutionConfig();
+    const instance = conversation.instance.name;
     await evolutionRequest(evolutionPath("chat/updateMessage", instance), {
       method: "POST",
       body: JSON.stringify({ number, key: parts.key, text }),
@@ -994,29 +970,26 @@ export async function whatsappRoutes(app: FastifyInstance) {
   });
 
   app.delete("/whatsapp/chats/:id/messages/:messageId", {
-    preHandler: allowRoles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.MANAGER, UserRole.SELLER),
+    preHandler: allowRoles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.MANAGER, UserRole.SELLER, UserRole.SUPPORT),
     schema: { tags: ["whatsapp"], summary: "Apagar mensagem enviada para todos", security: [{ sessionCookie: [] }] },
   }, async (request, reply) => {
     const { id, messageId } = z.object({ id: z.string().uuid(), messageId: z.string().uuid() }).parse(request.params);
-    const sellerId = request.user.role === UserRole.SELLER
-      ? (await prisma.seller.findUnique({ where: { userId: request.user.sub }, select: { id: true } }))?.id ?? "00000000-0000-0000-0000-000000000000"
-      : undefined;
     const message = await prisma.message.findFirst({
       where: {
         id: messageId,
         conversationId: id,
         fromMe: true,
         isDeleted: false,
-        ...(sellerId ? { conversation: { lead: { sellerId } } } : {}),
+        conversation: writableConversations(request.user),
       },
-      select: { id: true, externalId: true, providerPayload: true },
+      select: { id: true, externalId: true, providerPayload: true, conversation: { select: { remoteJid: true, instance: { select: { name: true } } } } },
     });
     const parts = providerMessageParts(message?.providerPayload);
     if (!message || !parts || !message.externalId) {
       return reply.code(404).send({ error: "not_found", message: "Mensagem não encontrada ou não pode ser apagada." });
     }
-    const conversation = await prisma.conversation.findUniqueOrThrow({ where: { id }, select: { remoteJid: true } });
-    const { instance } = evolutionConfig();
+    const conversation = message.conversation;
+    const instance = conversation.instance.name;
     await evolutionRequest(evolutionPath("chat/deleteMessageForEveryone", instance), {
       method: "DELETE",
       body: JSON.stringify({ id: message.externalId, fromMe: true, remoteJid: conversation.remoteJid }),

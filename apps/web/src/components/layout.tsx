@@ -2,6 +2,7 @@ import { Link, Outlet } from "@tanstack/react-router";
 import { ArrowUpRight, Bike, Menu } from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
+import { AnalyticsConsentSettings } from "./analytics-consent";
 import { Button } from "./ui/button";
 
 export function PublicLayout({ children }: { children: ReactNode }) {
@@ -18,7 +19,7 @@ export function PublicLayout({ children }: { children: ReactNode }) {
           <nav className={`${menuOpen ? "flex" : "hidden"} absolute left-0 right-0 top-[76px] flex-col gap-5 border-b border-black/5 bg-paper px-6 py-6 md:static md:flex md:flex-row md:items-center md:border-0 md:bg-transparent md:p-0`}>
             <a href="/#catalogo" onClick={() => setMenuOpen(false)} className="text-sm font-semibold text-ink/70 hover:text-ink">Motos</a>
             <a href="/#vendedores" onClick={() => setMenuOpen(false)} className="text-sm font-semibold text-ink/70 hover:text-ink">Nossa equipe</a>
-            <Link to="/login" className="text-sm font-semibold text-ink/70 hover:text-ink">Área do vendedor</Link>
+            <a href="/login" className="text-sm font-semibold text-ink/70 hover:text-ink">Área do vendedor</a>
             <a href="/#catalogo" onClick={() => setMenuOpen(false)}><Button size="small">Encontrar minha moto <ArrowUpRight size={15} /></Button></a>
           </nav>
         </div>
@@ -30,9 +31,10 @@ export function PublicLayout({ children }: { children: ReactNode }) {
             <p className="text-sm font-black tracking-[.18em] text-lime">INDEPENDÊNCIA MOTOS</p>
             <p className="mt-3 max-w-sm text-sm leading-6 text-white/60">Encontre sua próxima motocicleta com uma equipe pronta para ajudar.</p>
           </div>
-          <div className="flex gap-5 text-sm text-white/65">
+          <div className="flex flex-wrap gap-5 text-sm text-white/65">
             <Link to="/privacidade" className="hover:text-white">Privacidade</Link>
-            <Link to="/login" className="hover:text-white">Acesso da equipe</Link>
+            <AnalyticsConsentSettings />
+            <a href="/login" className="hover:text-white">Acesso da equipe</a>
           </div>
         </div>
       </footer>

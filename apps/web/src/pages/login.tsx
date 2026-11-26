@@ -2,7 +2,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Bike, LoaderCircle, LockKeyhole } from "lucide-react";
 import { useForm } from "react-hook-form";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { z } from "zod";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -29,7 +29,7 @@ export function LoginPage() {
   return (
     <main className="flex min-h-[calc(100vh-76px)] items-center justify-center bg-[#ebefe8] px-4 py-12">
       <Card className="w-full max-w-md rounded-[2rem] p-7 sm:p-9">
-        <Link to="/" className="inline-flex items-center gap-2 text-xs font-bold text-muted"><ArrowLeft size={14} /> Voltar ao catálogo</Link>
+        <a href="/" className="inline-flex items-center gap-2 text-xs font-bold text-muted"><ArrowLeft size={14} /> Voltar ao catálogo</a>
         <div className="mt-8 flex h-12 w-12 items-center justify-center rounded-2xl bg-lime text-pine"><Bike size={23} /></div>
         <p className="mt-6 text-xs font-bold uppercase tracking-[.18em] text-pine">Área da equipe</p>
         <h1 className="mt-2 text-3xl font-black tracking-tight">Acesse o CRM</h1>
