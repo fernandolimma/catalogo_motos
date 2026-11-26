@@ -3,6 +3,7 @@ import { Archive, ArrowLeft, BellOff, Check, Columns3, FileText, Forward, Loader
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { AdminShell } from "../components/admin-shell";
+import { useAppDialog } from "../components/app-dialog";
 import { Button } from "../components/ui/button";
 import { api, errorMessage } from "../lib/api";
 
@@ -72,6 +73,7 @@ function MessageMedia({ chatId, message }: { chatId: string; message: ChatMessag
 
 export function WhatsAppPage() {
   const navigate = useNavigate();
+  const dialog = useAppDialog();
   const { leadId } = useSearch({ from: "/admin/whatsapp" });
   const cache = useQueryClient();
   const logout = useMutation({
@@ -215,7 +217,7 @@ export function WhatsAppPage() {
     const file = event.currentTarget.files?.[0];
     if (!file) return;
     if (file.size > 8 * 1024 * 1024) {
-      window.alert("O arquivo deve ter no máximo 8 MB.");
+      void dialog.alert({ title: "Arquivo muito grande", message: "O arquivo deve ter no máximo 8 MB." });
       event.currentTarget.value = "";
       return;
     }
@@ -224,7 +226,7 @@ export function WhatsAppPage() {
       if (typeof reader.result !== "string") return;
       const base64 = reader.result.split(",")[1];
       if (!base64) {
-        window.alert("Não foi possível ler o arquivo selecionado.");
+        void dialog.alert({ title: "Não foi possível ler o arquivo", message: "Não foi possível ler o arquivo selecionado." });
         return;
       }
       sendMedia.mutate({
@@ -235,7 +237,7 @@ export function WhatsAppPage() {
         ...(replyTo ? { quotedMessageId: replyTo.id } : {}),
       });
     };
-    reader.onerror = () => window.alert("Falha ao ler o arquivo selecionado.");
+    reader.onerror = () => { void dialog.alert({ title: "Falha na leitura", message: "Falha ao ler o arquivo selecionado." }); };
     reader.readAsDataURL(file);
   }
   const updateChat = useMutation({
@@ -446,14 +448,14 @@ export function WhatsAppPage() {
                             <button key={emoji} type="button" aria-label={`Reagir com ${emoji}`} title={`Reagir com ${emoji}`} onClick={() => react.mutate({ messageId: message.id, reaction: message.reaction === emoji ? "" : emoji })} className="rounded px-0.5 text-xs hover:bg-white/10">{emoji}</button>
                           ))}
                           {message.fromMe && !message.mediaType && !message.isDeleted && (
-                            <button type="button" aria-label="Editar mensagem" title="Editar" onClick={() => {
-                              const content = window.prompt("Edite a mensagem:", message.content);
+                            <button type="button" aria-label="Editar mensagem" title="Editar" onClick={async () => {
+                              const content = await dialog.prompt({ title: "Editar mensagem", message: "Edite a mensagem:", initialValue: message.content, confirmLabel: "Salvar" });
                               if (content?.trim() && content.trim() !== message.content) editMessage.mutate({ messageId: message.id, content: content.trim() });
                             }} className="rounded p-1 text-[#aebac1] hover:bg-white/10 hover:text-white"><Pencil size={13} /></button>
                           )}
                           {message.fromMe && !message.isDeleted && (
-                            <button type="button" aria-label="Apagar mensagem para todos" title="Apagar para todos" onClick={() => {
-                              if (window.confirm("Apagar esta mensagem para todos?")) deleteMessage.mutate(message.id);
+                            <button type="button" aria-label="Apagar mensagem para todos" title="Apagar para todos" onClick={async () => {
+                              if (await dialog.confirm({ title: "Apagar mensagem?", message: "Apagar esta mensagem para todos?", confirmLabel: "Apagar mensagem", destructive: true })) deleteMessage.mutate(message.id);
                             }} className="rounded p-1 text-[#aebac1] hover:bg-red-950 hover:text-red-200"><Trash2 size={13} /></button>
                           )}
                         </div>

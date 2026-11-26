@@ -3,6 +3,7 @@ import { Check, LoaderCircle, Pencil, Plus, Settings, Tags, Trash2, X } from "lu
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { AdminShell } from "../components/admin-shell";
+import { useAppDialog } from "../components/app-dialog";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { api, errorMessage } from "../lib/api";
@@ -21,6 +22,7 @@ const optionSections: Array<{ type: OptionType; title: string; description: stri
 
 export function SettingsPage() {
   const navigate = useNavigate();
+  const dialog = useAppDialog();
   const cache = useQueryClient();
   const [values, setValues] = useState<Record<OptionType, string>>({ GROUP: "", MODEL: "", CATEGORY: "", YEAR: "", VERSION: "", ORIGIN: "" });
   const [editingOption, setEditingOption] = useState<string | null>(null);
@@ -147,8 +149,8 @@ export function SettingsPage() {
                             setEditedValue(option.value);
                             updateOption.reset();
                           }}><Pencil size={14} />Editar</Button>
-                          <Button type="button" size="small" variant="outline" aria-label={`Excluir ${option.value}`} disabled={deleteOption.isPending || updateOption.isPending} onClick={() => {
-                            if (window.confirm(`Excluir "${option.value}"? A opção deixará de aparecer nas listas de cadastro.`)) {
+                          <Button type="button" size="small" variant="outline" aria-label={`Excluir ${option.value}`} disabled={deleteOption.isPending || updateOption.isPending} onClick={async () => {
+                            if (await dialog.confirm({ title: "Excluir opção?", message: `Excluir "${option.value}"? A opção deixará de aparecer nas listas de cadastro.`, confirmLabel: "Excluir opção", destructive: true })) {
                               deleteOption.mutate(option.id);
                             }
                           }}><Trash2 size={14} />Excluir</Button>

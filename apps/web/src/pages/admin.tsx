@@ -6,6 +6,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { AdminShell } from "../components/admin-shell";
+import { useAppDialog } from "../components/app-dialog";
 import { api, errorMessage } from "../lib/api";
 import { formatBRL, leadStages, stageLabels, type Lead } from "../lib/types";
 
@@ -76,6 +77,7 @@ function downloadReport(report: SalesReport) {
 
 export function AdminPage() {
   const navigate = useNavigate();
+  const dialog = useAppDialog();
   const cache = useQueryClient();
   const [search, setSearch] = useState("");
   const [activeStage, setActiveStage] = useState<string>("");
@@ -275,16 +277,17 @@ export function AdminPage() {
                     <td className="px-5 py-4"><button className="text-left" onClick={() => setSelectedLead(lead.id)}><p className="font-bold">{lead.name}</p><p className="mt-1 text-[10px] text-muted">{lead.phone}</p></button></td>
                     <td className="px-4 py-4 text-ink/75">{lead.motorcycle ? `${lead.motorcycle.brand} ${lead.motorcycle.model}` : "Geral"}</td>
                     <td className="px-4 py-4"><div className="flex flex-col gap-2">
-                      <select aria-label={`Etapa de ${lead.name}`} className="max-w-40 rounded-lg border border-black/10 bg-white px-2 py-2 text-[10px] font-semibold" value={lead.stage} disabled={stageMutation.isPending} onChange={(event) => {
+                      <select aria-label={`Etapa de ${lead.name}`} className="max-w-40 rounded-lg border border-black/10 bg-white px-2 py-2 text-[10px] font-semibold" value={lead.stage} disabled={stageMutation.isPending} onChange={async (event) => {
                         const stage = event.target.value;
-                        const lostReason = stage === "LOST" ? window.prompt("Informe o motivo da perda:") ?? undefined : undefined;
+                        const lostReason = stage === "LOST" ? await dialog.prompt({ title: "Motivo da perda", message: "Informe o motivo da perda:" }) : undefined;
                         if (stage === "LOST" && !lostReason?.trim()) return;
-                        const salePrice = stage === "WON" ? window.prompt("Valor da venda (somente números, ex.: 25000):") ?? undefined : undefined;
+                        const salePrice = stage === "WON" ? await dialog.prompt({ title: "Venda concluída", message: "Valor da venda (somente números, ex.: 25000):" }) : undefined;
+                        if (stage === "WON" && salePrice === null) return;
                         if (stage === "WON" && salePrice && !/^\d+$/.test(salePrice.trim())) {
-                          window.alert("Informe somente números no valor da venda.");
+                          await dialog.alert({ title: "Valor inválido", message: "Informe somente números no valor da venda." });
                           return;
                         }
-                        stageMutation.mutate({ id: lead.id, stage, lostReason, salePriceCents: salePrice?.trim() || undefined });
+                        stageMutation.mutate({ id: lead.id, stage, lostReason: lostReason ?? undefined, salePriceCents: salePrice?.trim() || undefined });
                       }}>{leadStages.map((stage) => <option key={stage} value={stage}>{stageLabels[stage]}</option>)}</select>
                       {sellers.data && sellers.data.length > 0 && <select aria-label={`Vendedor de ${lead.name}`} className="max-w-40 rounded-lg border border-black/10 bg-white px-2 py-2 text-[10px] font-semibold" value={lead.seller?.id ?? ""} disabled={stageMutation.isPending} onChange={(event) => {
                         const sellerId = event.target.value;

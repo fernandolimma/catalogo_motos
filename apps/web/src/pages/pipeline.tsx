@@ -3,6 +3,7 @@ import { ArrowRight, CalendarDays, Columns3, MessageCircle, Search, UserRound } 
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { AdminShell } from "../components/admin-shell";
+import { useAppDialog } from "../components/app-dialog";
 import { Card } from "../components/ui/card";
 import { api, errorMessage } from "../lib/api";
 import { leadStages, stageLabels, type Lead } from "../lib/types";
@@ -13,17 +14,17 @@ function dateLabel(value: string) {
   return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short" }).format(new Date(value));
 }
 
-function stageChangeDetails(stage: string) {
+async function stageChangeDetails(stage: string, dialog: ReturnType<typeof useAppDialog>) {
   if (stage === "LOST") {
-    const lostReason = window.prompt("Informe o motivo da perda:");
+    const lostReason = await dialog.prompt({ title: "Motivo da perda", message: "Informe o motivo da perda:", confirmLabel: "Confirmar" });
     return lostReason?.trim() ? { lostReason: lostReason.trim() } : null;
   }
   if (stage === "WON") {
-    const salePrice = window.prompt("Valor da venda em reais (opcional, ex.: 25000,00):");
+    const salePrice = await dialog.prompt({ title: "Venda concluída", message: "Valor da venda em reais (opcional, ex.: 25000,00):", confirmLabel: "Confirmar" });
     if (salePrice === null) return null;
     if (!salePrice.trim()) return {};
     if (!/^\d+(?:[,.]\d{1,2})?$/.test(salePrice.trim())) {
-      window.alert("Informe um valor válido, como 25000,00.");
+      await dialog.alert({ title: "Valor inválido", message: "Informe um valor válido, como 25000,00." });
       return null;
     }
     const [whole = "0", fraction = ""] = salePrice.trim().replace(",", ".").split(".");
@@ -34,6 +35,7 @@ function stageChangeDetails(stage: string) {
 
 export function PipelinePage() {
   const navigate = useNavigate();
+  const dialog = useAppDialog();
   const cache = useQueryClient();
   const [search, setSearch] = useState("");
   const [draggedLead, setDraggedLead] = useState<string | null>(null);
@@ -79,9 +81,9 @@ export function PipelinePage() {
     );
   }, [leads.data, search]);
 
-  function moveToStage(lead: Lead, stage: string) {
+  async function moveToStage(lead: Lead, stage: string) {
     if (lead.stage === stage || moveLead.isPending) return;
-    const details = stageChangeDetails(stage);
+    const details = await stageChangeDetails(stage, dialog);
     if (details) moveLead.mutate({ id: lead.id, stage, details });
   }
 
@@ -148,7 +150,7 @@ export function PipelinePage() {
                   onDrop={(event) => {
                     event.preventDefault();
                     const lead = leads.data?.find((item) => item.id === (event.dataTransfer.getData("text/plain") || draggedLead));
-                    if (lead) moveToStage(lead, stage);
+                    if (lead) void moveToStage(lead, stage);
                     setDraggedLead(null);
                     setDropStage(null);
                   }}
@@ -195,7 +197,7 @@ export function PipelinePage() {
                           className="mt-3 w-full rounded-lg border border-black/10 bg-white px-2.5 py-2 text-[10px] font-semibold text-ink"
                           value={lead.stage}
                           disabled={moveLead.isPending}
-                          onChange={(event) => moveToStage(lead, event.target.value)}
+                          onChange={(event) => { void moveToStage(lead, event.target.value); }}
                         >
                           {leadStages.map((option) => <option key={option} value={option}>{stageLabels[option]}</option>)}
                         </select>

@@ -3,6 +3,7 @@ import { CalendarDays, ChevronLeft, ChevronRight, LoaderCircle, Mail, Pencil, Ph
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { AdminShell } from "../components/admin-shell";
+import { useAppDialog } from "../components/app-dialog";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { api, errorMessage } from "../lib/api";
@@ -24,6 +25,7 @@ function dateLabel(value: string) {
 
 export function ContactsPage() {
   const navigate = useNavigate();
+  const dialog = useAppDialog();
   const cache = useQueryClient();
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -176,8 +178,8 @@ export function ContactsPage() {
                             aria-label={`Excluir ${contact.name}`}
                             className="!border-red-200 !text-red-700 hover:!bg-red-50"
                             disabled={deleteContact.isPending}
-                            onClick={() => {
-                              if (window.confirm(`Excluir o contato de "${contact.name}"? Esta ação também removerá o histórico do Lead e não pode ser desfeita.`)) {
+                            onClick={async () => {
+                              if (await dialog.confirm({ title: "Excluir contato?", message: `Excluir o contato de "${contact.name}"? Esta ação também removerá o histórico do Lead e não pode ser desfeita.`, confirmLabel: "Excluir contato", destructive: true })) {
                                 deleteContact.reset();
                                 deleteContact.mutate(contact.id);
                               }
