@@ -128,8 +128,11 @@ O catálogo e o CRM podem ser instalados pelo menu do navegador, em HTTPS ou em 
 - Perfis iniciais e restrição de vendedor aos próprios leads no backend.
 - Lista paginada de leads, busca, filtro de etapa, ficha e histórico; anotações e atualização auditada do funil.
 - Tela Kanban dedicada para acompanhar leads em todas as etapas, pesquisar contatos e mover cartões por arrastar/soltar ou seletor de etapa.
+- Leads transferidos diretamente de “Lead perdido” para “Novo lead” recebem a tag permanente “Remarketing”, inclusive quando essa movimentação já consta no histórico; a identificação aparece no funil e na ficha do lead.
 - Indicadores reais por etapa e taxa de conversão (vendas concluídas / todos os leads).
 - Relatórios filtráveis por data com recebimento diário, distribuição por etapa/origem/vendedor, conversão dos leads do período, vendas e receita por data de fechamento; exportação agregada em CSV.
+- O gráfico de leads e vendas por origem compara os leads recebidos no período selecionado com aqueles que estão atualmente em “Venda concluída”, independentemente da data de fechamento.
+- O card “Etapas no período” apresenta as etapas atuais dos leads recebidos no mês corrente, independentemente do filtro de datas dos demais relatórios e do CSV.
 - Telas administrativas separadas para cadastrar motocicletas, gerenciar a lista de motocicletas cadastradas (incluindo publicação e estado do estoque) e cadastrar/editar vendedores. O formulário usa grupos, modelos, categorias, anos e versões cadastrados em Configurações, além de várias cores e disponibilidade para todos os vendedores.
 - API autenticada para cadastrar/editar motos e vendedores.
 - Swagger/OpenAPI em `/docs`.
@@ -176,6 +179,10 @@ O seed usa `ADMIN_EMAIL`, `ADMIN_NAME` e `ADMIN_PASSWORD` e faz upsert idempoten
 ## Evolution API e WhatsApp
 
 O Docker Compose executa a Evolution API `v2.3.7` com banco PostgreSQL, Redis e volume persistente para a sessão do WhatsApp. O serviço API da loja acessa a Evolution pela rede interna do Docker; a porta `8081` fica vinculada apenas a `127.0.0.1` para diagnóstico local. A chave da Evolution e o segredo do webhook nunca são enviados ao navegador.
+
+Nas próprias conversas, o botão de microfone permite gravar, ouvir, descartar ou enviar mensagens de voz de até 2 minutos e 8 MB. A gravação exige permissão para usar o microfone e um navegador compatível em HTTPS ou localhost. A Evolution converte o áudio para o formato de mensagem de voz do WhatsApp; respostas citadas não são suportadas para gravações.
+
+No campo de mensagem, Enter envia o texto e Shift+Enter insere uma nova linha.
 
 1. Gere valores aleatórios diferentes para `EVOLUTION_API_KEY`, `EVOLUTION_WEBHOOK_SECRET` e `EVOLUTION_POSTGRES_PASSWORD` no `.env`.
 2. Suba os serviços com `docker compose up --build -d`.

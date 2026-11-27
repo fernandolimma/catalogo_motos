@@ -3,6 +3,7 @@ import { ArrowRight, CalendarDays, Columns3, MessageCircle, Search, UserRound } 
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { AdminShell } from "../components/admin-shell";
+import { RemarketingBadge } from "../components/remarketing-badge";
 import { useAppDialog } from "../components/app-dialog";
 import { Card } from "../components/ui/card";
 import { api, errorMessage } from "../lib/api";
@@ -67,6 +68,7 @@ export function PipelinePage() {
         cache.invalidateQueries({ queryKey: ["kanban-leads"] }),
         cache.invalidateQueries({ queryKey: ["leads"] }),
         cache.invalidateQueries({ queryKey: ["crm-overview"] }),
+        cache.invalidateQueries({ queryKey: ["crm-report"] }),
         cache.invalidateQueries({ queryKey: ["lead-detail"] }),
       ]);
     },
@@ -179,6 +181,7 @@ export function PipelinePage() {
                           </div>
                           <span className={`shrink-0 rounded-lg px-2 py-1 text-[9px] font-bold ${isTerminal ? "bg-paper text-muted" : "bg-[#f3f6e8] text-pine"}`}>{lead.source}</span>
                         </div>
+                        {lead.isRemarketing && <div className="mt-2"><RemarketingBadge /></div>}
                         <Link
                           className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-[#eaf0e8] px-2.5 py-2 text-[10px] font-bold text-pine transition hover:bg-[#dfe9dc]"
                           to="/admin/whatsapp"

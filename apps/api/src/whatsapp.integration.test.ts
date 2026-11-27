@@ -20,6 +20,7 @@ test("isolates WhatsApp accounts and enforces read-only cross-account access", {
   const originalFetch = globalThis.fetch;
   const accounts = new Set<string>();
   const sentPaths: string[] = [];
+  const sentAudio: { number: string; audio: string }[] = [];
   globalThis.fetch = async (input, init) => {
     const url = new URL(String(input));
     if (url.pathname.startsWith("/instance/connectionState/")) {
@@ -34,6 +35,11 @@ test("isolates WhatsApp accounts and enforces read-only cross-account access", {
     if (url.pathname.startsWith("/message/sendText/")) {
       sentPaths.push(url.pathname);
       return Response.json({ key: { id: randomUUID() }, message: { conversation: "test" } });
+    }
+    if (url.pathname.startsWith("/message/sendWhatsAppAudio/") && typeof init?.body === "string") {
+      sentPaths.push(url.pathname);
+      sentAudio.push(JSON.parse(init.body));
+      return Response.json({ key: { id: randomUUID() }, message: { audioMessage: { mimetype: "audio/ogg; codecs=opus", ptt: true } } });
     }
     if (url.pathname.startsWith("/chat/getBase64FromMediaMessage/")) {
       return Response.json({ base64: "dGVzdA==", mimetype: "image/png" });
@@ -122,6 +128,7 @@ test("isolates WhatsApp accounts and enforces read-only cross-account access", {
       { method: "PATCH" as const, suffix: "/preferences", payload: { isPinned: true } },
       { method: "POST" as const, suffix: "/messages", payload: { text: "teste" } },
       { method: "POST" as const, suffix: "/media", payload: { fileName: "test.txt", mimeType: "text/plain", base64: "dGVzdA==" } },
+      { method: "POST" as const, suffix: "/media", payload: { fileName: "audio.webm", mimeType: "audio/webm", base64: "dGVzdA==", voiceMessage: true } },
       { method: "POST" as const, suffix: `/messages/${message.id}/reaction`, payload: { reaction: "👍" } },
       { method: "PATCH" as const, suffix: `/messages/${message.id}`, payload: { text: "teste" } },
       { method: "DELETE" as const, suffix: `/messages/${message.id}`, payload: undefined },
@@ -152,6 +159,25 @@ test("isolates WhatsApp accounts and enforces read-only cross-account access", {
     const send = await app.inject({ method: "POST", url: `/api/v1/whatsapp/chats/${chatId}/messages`, headers: headers(firstSellerId), payload: { text: "Olá de volta" } });
     assert.equal(send.statusCode, 201);
     assert.deepEqual(sentPaths, [`/message/sendText/catalogo-user-${firstSellerId}`]);
+    const audio = await app.inject({
+      method: "POST", url: `/api/v1/whatsapp/chats/${chatId}/media`, headers: headers(firstSellerId),
+      payload: { fileName: "audio.webm", mimeType: "audio/webm", base64: "dGVzdA==", voiceMessage: true },
+    });
+    assert.equal(audio.statusCode, 201);
+    assert.equal(audio.json().message.mediaType, "audio");
+    assert.equal(audio.json().message.mimeType, "audio/ogg");
+    assert.equal(audio.json().message.content, "[Áudio]");
+    assert.deepEqual(sentAudio, [{ number: "5511988888888", audio: "dGVzdA==" }]);
+    assert.equal(sentPaths.at(-1), `/message/sendWhatsAppAudio/catalogo-user-${firstSellerId}`);
+    for (const payload of [
+      { fileName: "x.png", mimeType: "image/png", base64: "dGVzdA==", voiceMessage: true },
+      { fileName: "audio.webm", mimeType: "audio/webm", base64: "dGVzdA==" },
+      { fileName: "audio.webm", mimeType: "audio/webm", base64: "dGVzdA==", voiceMessage: true, quotedMessageId: message.id },
+    ]) {
+      const invalid: { statusCode: number } = await app.inject({ method: "POST", url: `/api/v1/whatsapp/chats/${chatId}/media`, headers: headers(firstSellerId), payload });
+      assert.equal(invalid.statusCode, 400);
+    }
+    assert.equal(sentAudio.length, 1);
     const unknown = await app.inject({
       method: "POST", url: "/api/v1/whatsapp/webhook",
       headers: { "x-evolution-webhook-secret": "test-webhook-secret" },

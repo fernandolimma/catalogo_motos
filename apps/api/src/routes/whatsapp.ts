@@ -737,7 +737,7 @@ export async function whatsappRoutes(app: FastifyInstance) {
       mimeType: z.enum([
         "image/jpeg", "image/png", "image/webp",
         "video/mp4",
-        "audio/ogg", "audio/mpeg", "audio/mp4",
+        "audio/ogg", "audio/mpeg", "audio/mp4", "audio/webm",
         "application/pdf", "text/plain",
         "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -745,7 +745,12 @@ export async function whatsappRoutes(app: FastifyInstance) {
       base64: z.string().min(4).max(11_200_000).regex(/^[A-Za-z0-9+/]+={0,2}$/),
       caption: z.string().trim().max(1000).optional(),
       quotedMessageId: z.string().uuid().optional(),
+      voiceMessage: z.boolean().optional(),
     }).parse(request.body);
+    if ((input.voiceMessage && (!["audio/ogg", "audio/mp4", "audio/webm"].includes(input.mimeType) || input.caption || input.quotedMessageId))
+      || (!input.voiceMessage && input.mimeType === "audio/webm")) {
+      return reply.code(400).send({ error: "invalid_voice_message", message: "O áudio gravado não aceita legenda ou resposta citada e deve estar em um formato compatível." });
+    }
     const base64Bytes = Buffer.from(input.base64, "base64");
     if (base64Bytes.length > 8 * 1024 * 1024 || input.base64.length % 4 !== 0) {
       return reply.code(413).send({ error: "media_too_large", message: "O arquivo deve ter no máximo 8 MB." });
@@ -782,9 +787,9 @@ export async function whatsappRoutes(app: FastifyInstance) {
           : "document";
     const safeFileName = input.fileName.replace(/[\\/:*?"<>|]/g, "_");
     const instance = conversation.instance.name;
-    const response = await evolutionRequest(evolutionPath("message/sendMedia", instance), {
+    const response = await evolutionRequest(evolutionPath(input.voiceMessage ? "message/sendWhatsAppAudio" : "message/sendMedia", instance), {
       method: "POST",
-      body: JSON.stringify({
+      body: JSON.stringify(input.voiceMessage ? { number, audio: input.base64 } : {
         number,
         mediatype: mediaType,
         media: input.base64,
@@ -793,7 +798,7 @@ export async function whatsappRoutes(app: FastifyInstance) {
         ...(input.caption ? { caption: input.caption } : {}),
         ...(quoted ? { quoted } : {}),
       }),
-    });
+    }, input.voiceMessage ? 60_000 : 12_000);
     const data = isRecord(response) ? response : {};
     const key = isRecord(data.key) ? data.key : {};
     const externalId = typeof key.id === "string" ? key.id : null;
@@ -805,7 +810,7 @@ export async function whatsappRoutes(app: FastifyInstance) {
         fromMe: true,
         status: "sent",
         mediaType,
-        mimeType: input.mimeType,
+        mimeType: input.voiceMessage ? "audio/ogg" : input.mimeType,
         fileName: safeFileName,
         quotedContent,
         providerPayload: isRecord(response) ? jsonValue(response) : undefined,

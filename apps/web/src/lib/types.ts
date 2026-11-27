@@ -39,6 +39,7 @@ export type Lead = {
   phone: string;
   email?: string | null;
   stage: string;
+  isRemarketing: boolean;
   source: string;
   createdAt: string;
   updatedAt: string;

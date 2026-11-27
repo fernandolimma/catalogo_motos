@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, ArrowLeft, BellOff, Check, Columns3, FileText, Forward, LoaderCircle, LogOut, MessageCircle, Paperclip, Pencil, Pin, QrCode, Reply, Search, Send, Smartphone, Star, Trash2, UserRound, X } from "lucide-react";
+import { Archive, ArrowLeft, BellOff, Check, Columns3, FileText, Forward, LoaderCircle, LogOut, MessageCircle, MoreHorizontal, Paperclip, Pencil, Pin, QrCode, Reply, Search, Send, Smartphone, Star, Trash2, UserRound, X } from "lucide-react";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { AdminShell } from "../components/admin-shell";
 import { useAppDialog } from "../components/app-dialog";
+import { WhatsAppAudioRecorder } from "../components/whatsapp-audio-recorder";
 import { Button } from "../components/ui/button";
 import { api, errorMessage } from "../lib/api";
 
@@ -84,6 +85,7 @@ export function WhatsAppPage() {
     },
   });
   const [selectedChat, setSelectedChat] = useState<string | null>(null);
+  const [showMobileChat, setShowMobileChat] = useState(false);
   const [text, setText] = useState("");
   const [chatSearch, setChatSearch] = useState("");
   const [chatFilter, setChatFilter] = useState<ChatFilter>("all");
@@ -135,6 +137,7 @@ export function WhatsAppPage() {
         setChatSearch("");
         setChatFilter(leadChat.data.isArchived ? "archived" : "all");
         setSelectedChat(leadChat.data.id);
+        setShowMobileChat(true);
       }
       return;
     }
@@ -178,6 +181,16 @@ export function WhatsAppPage() {
       if (fileInputRef.current) fileInputRef.current.value = "";
       await Promise.all([
         cache.invalidateQueries({ queryKey: ["whatsapp-messages", selectedChat] }),
+        cache.invalidateQueries({ queryKey: ["whatsapp-chats"] }),
+      ]);
+    },
+  });
+  const sendAudio = useMutation({
+    mutationFn: async ({ chatId, ...audio }: { chatId: string; fileName: string; mimeType: string; base64: string }) =>
+      api.post(`/whatsapp/chats/${chatId}/media`, { ...audio, voiceMessage: true }, { timeout: 75_000 }),
+    onSuccess: async (_result, { chatId }) => {
+      await Promise.all([
+        cache.invalidateQueries({ queryKey: ["whatsapp-messages", chatId] }),
         cache.invalidateQueries({ queryKey: ["whatsapp-chats"] }),
       ]);
     },
@@ -281,28 +294,34 @@ export function WhatsAppPage() {
 
   return (
     <AdminShell userName={currentUser?.name ?? "Usuário"} role={currentUser?.role ?? "SELLER"} fullScreen>
-      <div className="grid h-[100dvh] min-h-[560px] grid-cols-1 overflow-hidden bg-[#0b141a] text-[#e9edef] md:grid-cols-[minmax(300px,32%)_minmax(0,1fr)]">
-        <section aria-label="Conversas" className={`${selectedChat ? "hidden" : "flex"} min-h-0 flex-col border-r border-[#2a3942] bg-[#111b21] md:flex`}>
-          <header className="border-b border-[#2a3942] px-3 py-3">
+      <div className="flex h-[100dvh] min-h-0 overflow-hidden bg-[#111313] text-[#e9edef]">
+        <nav aria-label="Navegação do WhatsApp" className="hidden w-[54px] shrink-0 flex-col items-center border-r border-white/10 bg-[#1d2021] py-3 md:flex">
+          <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#303536] text-[#e9edef]" aria-label="Conversas"><MessageCircle size={20} /></span>
+          <Link to="/admin/funil" title="Voltar ao funil de vendas" aria-label="Voltar ao funil de vendas" className="mt-2 rounded-full p-2.5 text-[#aebac1] hover:bg-white/10 hover:text-white"><Columns3 size={19} /></Link>
+          <button type="button" title="Sair" aria-label="Sair do sistema" onClick={() => logout.mutate()} disabled={logout.isPending} className="mt-auto rounded-full p-2.5 text-[#aebac1] hover:bg-white/10 hover:text-white disabled:opacity-50"><LogOut size={19} /></button>
+        </nav>
+        <div className="grid min-w-0 flex-1 grid-cols-1 md:grid-cols-[minmax(300px,32%)_minmax(0,1fr)]">
+        <section aria-label="Conversas" className={`${showMobileChat && activeChat ? "hidden" : "flex"} min-h-0 flex-col border-r border-white/10 bg-[#111313] md:flex`}>
+          <header className="px-4 pb-3 pt-5">
             <div className="mb-3 flex items-center justify-between">
               <h1 className="text-xl font-bold tracking-tight">WhatsApp</h1>
               <div className="flex items-center gap-2">
-                <span className="flex items-center gap-1.5 rounded-full bg-[#202c33] px-2.5 py-1 text-[10px] font-semibold text-[#aebac1]">
+                <span className="flex items-center gap-1.5 rounded-full bg-[#242727] px-2.5 py-1 text-[10px] font-semibold text-[#aebac1]">
                   <span className={`h-2 w-2 rounded-full ${isConnected ? "bg-[#00a884]" : "bg-amber-500"}`} />
                   {connection.isLoading ? "Verificando" : isConnected ? "Conectado" : "Desconectado"}
                 </span>
-                <Link to="/admin/funil" title="Voltar ao funil de vendas" aria-label="Voltar ao funil de vendas" className="rounded-full p-2 text-[#aebac1] transition hover:bg-[#202c33] hover:text-white">
+                <Link to="/admin/funil" title="Voltar ao funil de vendas" aria-label="Voltar ao funil de vendas" className="rounded-full p-2 text-[#aebac1] transition hover:bg-[#202c33] hover:text-white md:hidden">
                   <Columns3 size={18} />
                 </Link>
-                <button type="button" title="Sair" aria-label="Sair do sistema" onClick={() => logout.mutate()} disabled={logout.isPending} className="rounded-full p-2 text-[#aebac1] transition hover:bg-[#202c33] hover:text-white disabled:opacity-50">
+                <button type="button" title="Sair" aria-label="Sair do sistema" onClick={() => logout.mutate()} disabled={logout.isPending} className="rounded-full p-2 text-[#aebac1] transition hover:bg-[#202c33] hover:text-white disabled:opacity-50 md:hidden">
                   <LogOut size={17} />
                 </button>
               </div>
             </div>
-            <label className="flex h-10 items-center gap-2 rounded-lg bg-[#202c33] px-3 text-[#aebac1] focus-within:ring-1 focus-within:ring-[#00a884]">
+            <label className="flex h-10 items-center gap-3 rounded-full bg-[#292c2d] px-4 text-[#aebac1] focus-within:ring-1 focus-within:ring-[#00a884]">
               <Search size={16} className="shrink-0" />
               <input
-                className="w-full bg-transparent text-xs text-[#e9edef] outline-none placeholder:text-[#8696a0]"
+                className="w-full bg-transparent text-[13px] text-[#e9edef] outline-none placeholder:text-[#8696a0]"
                 aria-label="Pesquisar conversas e mensagens"
                 placeholder="Pesquisar ou começar uma nova conversa"
                 value={chatSearch}
@@ -365,9 +384,9 @@ export function WhatsAppPage() {
                 const lastMessage = chat.messages[0];
                 const title = chat.lead?.name ?? contactPhone(chat.remoteJid);
                 return (
-                  <li key={chat.id} className={`border-b border-[#202c33] px-2 py-1 ${selectedChat === chat.id ? "bg-[#2a3942]" : "hover:bg-[#202c33]"}`}>
+                  <li key={chat.id} className={`mx-2 rounded-xl px-2 ${selectedChat === chat.id ? "bg-[#2d3031]" : "hover:bg-[#202323]"}`}>
                     <div className="flex items-center gap-1">
-                      <button type="button" onClick={() => setSelectedChat(chat.id)} className="min-w-0 flex-1 px-2 py-2 text-left">
+                      <button type="button" onClick={() => { setSelectedChat(chat.id); setShowMobileChat(true); }} className="min-w-0 flex-1 px-2 py-2 text-left">
                         <span className="flex items-center gap-3">
                           <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#263c49] text-sm font-bold text-[#53bdeb]">{title.slice(0, 1).toLocaleUpperCase("pt-BR") || <UserRound size={19} />}</span>
                           <span className="min-w-0 flex-1">
@@ -388,7 +407,9 @@ export function WhatsAppPage() {
                           </span>
                         </span>
                       </button>
-                      {chat.instance.ownerId === currentUser?.id && <div className="flex shrink-0 flex-col gap-0.5">
+                      {chat.instance.ownerId === currentUser?.id && <details className="relative shrink-0">
+                        <summary aria-label={`Opções da conversa ${title}`} className="flex h-9 w-9 cursor-pointer list-none items-center justify-center rounded-full text-[#aebac1] hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#00a884]"><MoreHorizontal size={19} /></summary>
+                        <div className="absolute right-0 top-full z-10 flex gap-1 rounded-lg border border-white/10 bg-[#292c2d] p-1 shadow-xl">
                         <button type="button" title={chat.isPinned ? "Desafixar conversa" : "Fixar conversa"} aria-label={chat.isPinned ? "Desafixar conversa" : "Fixar conversa"} onClick={() => updateChat.mutate({ chatId: chat.id, preference: { isPinned: !chat.isPinned } })} className="rounded p-1.5 text-[#8696a0] hover:bg-[#2a3942] hover:text-white">
                           <Pin size={12} />
                         </button>
@@ -401,7 +422,8 @@ export function WhatsAppPage() {
                         <button type="button" title={chat.isArchived ? "Desarquivar conversa" : "Arquivar conversa"} aria-label={chat.isArchived ? "Desarquivar conversa" : "Arquivar conversa"} onClick={() => updateChat.mutate({ chatId: chat.id, preference: { isArchived: !chat.isArchived } })} className="rounded p-1.5 text-[#8696a0] hover:bg-[#2a3942] hover:text-white">
                           {chat.isArchived ? <Check size={12} /> : <Archive size={12} />}
                         </button>
-                      </div>}
+                        </div>
+                      </details>}
                     </div>
                   </li>
                 );
@@ -410,12 +432,12 @@ export function WhatsAppPage() {
           </div>
         </section>
 
-        <section aria-label="Mensagens" className={`${selectedChat ? "flex" : "hidden"} min-h-0 flex-col bg-[#0b141a] md:flex`}>
+        <section aria-label="Mensagens" className={`${showMobileChat && activeChat ? "flex" : "hidden"} min-h-0 min-w-0 flex-col bg-[#111313] md:flex`}>
           {activeChat ? (
             <>
-              <header className="flex min-h-[64px] items-center justify-between gap-3 border-b border-[#2a3942] bg-[#202c33] px-3 sm:px-5">
+              <header className="flex min-h-[60px] items-center justify-between gap-3 border-b border-white/10 bg-[#111313] px-3 sm:px-5">
                 <div className="flex min-w-0 items-center gap-3">
-                  <button type="button" className="rounded-full p-2 text-[#aebac1] hover:bg-[#2a3942] md:hidden" aria-label="Voltar às conversas" onClick={() => setSelectedChat(null)}><ArrowLeft size={18} /></button>
+                  <button type="button" className="rounded-full p-2 text-[#aebac1] hover:bg-[#2a3942] md:hidden" aria-label="Voltar às conversas" onClick={() => setShowMobileChat(false)}><ArrowLeft size={18} /></button>
                   <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#263c49] text-sm font-bold text-[#53bdeb]">{(activeChat.lead?.name ?? contactPhone(activeChat.remoteJid)).slice(0, 1).toLocaleUpperCase("pt-BR")}</span>
                   <div className="min-w-0">
                     <h2 className="truncate text-sm font-semibold text-[#e9edef]">{activeChat.lead?.name ?? contactPhone(activeChat.remoteJid)}</h2>
@@ -429,19 +451,21 @@ export function WhatsAppPage() {
                   {canWrite && <button type="button" title={activeChat.isArchived ? "Desarquivar conversa" : "Arquivar conversa"} aria-label={activeChat.isArchived ? "Desarquivar conversa" : "Arquivar conversa"} onClick={() => updateChat.mutate({ chatId: activeChat.id, preference: { isArchived: !activeChat.isArchived } })} className="rounded-full p-2 text-[#aebac1] transition hover:bg-[#2a3942] hover:text-white">{activeChat.isArchived ? <Check size={18} /> : <Archive size={18} />}</button>}
                 </div>
               </header>
-              <div className="whatsapp-wallpaper flex-1 space-y-2 overflow-y-auto px-3 py-5 sm:px-6 lg:px-10">
+              <div className="whatsapp-wallpaper min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-5 sm:px-6 lg:px-14">
                 {messages.isLoading && <p className="text-center text-xs text-[#aebac1]">Carregando mensagens...</p>}
                 {messages.isError && <p className="rounded-xl bg-red-950/70 p-3 text-xs text-red-200" role="alert">{errorMessage(messages.error)}</p>}
                 {messages.data?.map((message) => (
                   <div key={message.id} className={`flex ${message.fromMe ? "justify-end" : "justify-start"}`}>
-                    <article className={`max-w-[88%] min-w-32 whitespace-pre-wrap break-words rounded-xl px-3 py-2 text-[13px] leading-[1.4] shadow-sm sm:max-w-[75%] ${message.fromMe ? "rounded-tr-sm bg-[#005c4b] text-[#e9edef]" : "rounded-tl-sm bg-[#202c33] text-[#e9edef]"}`}>
+                    <article className={`max-w-[88%] min-w-32 whitespace-pre-wrap break-words rounded-lg px-3 py-2 text-[13px] leading-[1.4] shadow-sm sm:max-w-[75%] ${message.fromMe ? "rounded-tr-sm bg-[#075c45] text-[#e9edef]" : "rounded-tl-sm bg-[#252929] text-[#e9edef]"}`}>
                       {message.quotedContent && <p className="mb-2 border-l-2 border-[#00a884] pl-2 text-xs text-[#aebac1]">{message.quotedContent}</p>}
                       {message.mediaType && !message.isDeleted && <MessageMedia chatId={activeChat.id} message={message} />}
                       <p>{message.content}</p>
                       {message.reaction && <span className="mt-1 inline-block rounded-full bg-[#111b21] px-2 py-0.5 text-xs shadow">{message.reaction}</span>}
                       <p className="mt-1 text-right text-[9px] text-[#aebac1]">{timeLabel(message.createdAt)}{message.fromMe ? ` · ${message.status}` : ""}</p>
                       {canWrite && !message.isDeleted && (
-                        <div className="mt-1 flex items-center justify-end gap-1 border-t border-white/10 pt-1">
+                        <details className="mt-1">
+                          <summary className="ml-auto w-fit cursor-pointer list-none rounded p-1 text-[#aebac1] hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#00a884]" aria-label="Opções da mensagem"><MoreHorizontal size={15} /></summary>
+                        <div className="flex flex-wrap items-center justify-end gap-1 border-t border-white/10 pt-1">
                           <button type="button" aria-label="Responder a esta mensagem" title="Responder" onClick={() => setReplyTo(message)} className="rounded p-1 text-[#aebac1] hover:bg-white/10 hover:text-white"><Reply size={13} /></button>
                           <button type="button" aria-label="Encaminhar mensagem" title="Encaminhar" onClick={() => { setForwardingMessage(message); setForwardTarget(""); }} className="rounded p-1 text-[#aebac1] hover:bg-white/10 hover:text-white"><Forward size={13} /></button>
                           {["👍", "❤️", "😂", "😮", "😢", "🙏"].map((emoji) => (
@@ -459,15 +483,16 @@ export function WhatsAppPage() {
                             }} className="rounded p-1 text-[#aebac1] hover:bg-red-950 hover:text-red-200"><Trash2 size={13} /></button>
                           )}
                         </div>
+                        </details>
                       )}
                     </article>
                   </div>
                 ))}
                 <div ref={bottomRef} />
               </div>
-              {canWrite ? <form className="border-t border-[#202c33] bg-[#202c33] p-2.5 sm:px-4 sm:py-3" onSubmit={(event) => {
+              {canWrite ? <form className="bg-[#111313] p-2 sm:px-4 sm:py-3" onSubmit={(event) => {
                 event.preventDefault();
-                if (text.trim() && !send.isPending && !sendMedia.isPending) send.mutate();
+                if (text.trim() && isConnected && !send.isPending && !sendMedia.isPending && !sendAudio.isPending) send.mutate();
               }}>
                 {forwardingMessage && <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg bg-[#111b21] p-2 text-xs">
                   <span className="font-bold">Encaminhar:</span>
@@ -484,7 +509,7 @@ export function WhatsAppPage() {
                   <button type="button" aria-label="Cancelar encaminhamento" onClick={() => setForwardingMessage(null)}><X size={14} /></button>
                 </div>}
                 {replyTo && <div className="mb-2 flex items-center justify-between rounded-lg bg-[#111b21] px-3 py-2 text-xs"><span className="truncate"><span className="font-bold">Respondendo:</span> {replyTo.content}</span><button type="button" aria-label="Cancelar resposta" onClick={() => setReplyTo(null)}><X size={14} /></button></div>}
-                <div className="flex items-end gap-2">
+                <div className="flex flex-wrap items-end gap-1 rounded-3xl bg-[#252929] px-2 py-1">
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -492,14 +517,27 @@ export function WhatsAppPage() {
                     accept="image/jpeg,image/png,image/webp,video/mp4,audio/ogg,audio/mpeg,audio/mp4,application/pdf,text/plain,.doc,.docx,.xls,.xlsx"
                     onChange={onFileSelected}
                   />
-                  <button type="button" aria-label="Anexar arquivo" title="Anexar arquivo" onClick={() => fileInputRef.current?.click()} disabled={!isConnected || sendMedia.isPending} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#aebac1] transition hover:bg-[#2a3942] hover:text-white disabled:opacity-50">
+                  <button type="button" aria-label="Anexar arquivo" title="Anexar arquivo" onClick={() => fileInputRef.current?.click()} disabled={!isConnected || sendMedia.isPending || sendAudio.isPending} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#aebac1] transition hover:bg-[#2a3942] hover:text-white disabled:opacity-50">
                     {sendMedia.isPending ? <LoaderCircle size={18} className="animate-spin" /> : <Paperclip size={19} />}
                   </button>
-                  <textarea className="max-h-32 min-h-10 flex-1 resize-y rounded-lg bg-[#2a3942] px-3 py-2.5 text-[13px] text-[#e9edef] outline-none placeholder:text-[#8696a0] focus:ring-1 focus:ring-[#00a884]" aria-label="Mensagem ou legenda" placeholder="Digite uma mensagem" maxLength={4000} value={text} onChange={(event) => setText(event.target.value)} />
-                  <Button type="submit" aria-label="Enviar mensagem" className="!h-10 !min-h-10 !w-10 !shrink-0 !rounded-full !bg-[#00a884] !p-0 !text-white hover:!bg-[#06cf9c]" disabled={!text.trim() || send.isPending || sendMedia.isPending || !isConnected}>
+                  <textarea className="max-h-32 min-h-10 min-w-24 flex-1 resize-y bg-transparent px-2 py-2.5 text-[13px] text-[#e9edef] outline-none placeholder:text-[#8696a0] focus-visible:ring-1 focus-visible:ring-[#00a884]" aria-label="Mensagem ou legenda" aria-describedby="whatsapp-send-hint" placeholder="Digite uma mensagem" maxLength={4000} value={text} onChange={(event) => setText(event.target.value)} onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey && !event.nativeEvent.isComposing) {
+                      event.preventDefault();
+                      if (!event.repeat) event.currentTarget.form?.requestSubmit();
+                    }
+                  }} />
+                  <WhatsAppAudioRecorder
+                    key={activeChat.id}
+                    disabled={!isConnected || send.isPending || sendMedia.isPending}
+                    replySelected={Boolean(replyTo)}
+                    onSend={async (audio) => { await sendAudio.mutateAsync({ chatId: activeChat.id, ...audio }); }}
+                  />
+                  <Button type="submit" aria-label="Enviar mensagem" className="!h-10 !min-h-10 !w-10 !shrink-0 !rounded-full !bg-[#00a884] !p-0 !text-white hover:!bg-[#06cf9c]" disabled={!text.trim() || send.isPending || sendMedia.isPending || sendAudio.isPending || !isConnected}>
                     {send.isPending ? <LoaderCircle size={17} className="animate-spin" /> : <Send size={17} />}
                   </Button>
                 </div>
+                <p id="whatsapp-send-hint" className="mt-1 px-2 text-[10px] text-[#aebac1]">Enter para enviar · Shift+Enter para nova linha</p>
+                {replyTo && <p className="px-2 text-[10px] text-[#aebac1]">Para gravar áudio, cancele a resposta selecionada.</p>}
                 {send.isError && <p className="mt-2 px-2 text-xs text-red-300" role="alert">{errorMessage(send.error)}</p>}
               </form> : <p className="border-t border-[#202c33] bg-[#202c33] p-4 text-center text-xs text-[#aebac1]">Esta conversa está disponível somente para leitura.</p>}
             </>
@@ -511,6 +549,7 @@ export function WhatsAppPage() {
             </div>
           )}
         </section>
+        </div>
       </div>
     </AdminShell>
   );

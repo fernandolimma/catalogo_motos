@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Cell, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Activity, ArrowDownRight, ArrowUpRight, CheckCheck, ChevronLeft, ChevronRight, CircleHelp, ClipboardList, Download, Search, Users, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { AdminShell } from "../components/admin-shell";
+import { RemarketingBadge } from "../components/remarketing-badge";
 import { useAppDialog } from "../components/app-dialog";
 import { api, errorMessage } from "../lib/api";
 import { formatBRL, leadStages, stageLabels, type Lead } from "../lib/types";
@@ -17,7 +18,7 @@ type SalesReport = {
   period: { from: string; to: string };
   totals: { leads: number; won: number; lost: number; conversion: number; sales: number; revenueCents: string };
   byStage: Record<string, number>;
-  bySource: Array<{ source: string; total: number }>;
+  bySource: Array<{ source: string; total: number; won: number }>;
   bySeller: Array<{ sellerId: string | null; sellerName: string; total: number }>;
   dailyTrend: Array<{ date: string; total: number }>;
 };
@@ -32,6 +33,10 @@ function metricIcon(stage: string) {
 
 function dateLabel(value: string) {
   return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
+}
+
+function reportDateLabel(value: string) {
+  return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeZone: "UTC" }).format(new Date(`${value}T00:00:00Z`));
 }
 
 function dateInputValue(date: Date) {
@@ -90,6 +95,23 @@ export function AdminPage() {
     return dateInputValue(date);
   });
   const [reportTo, setReportTo] = useState(() => dateInputValue(new Date()));
+  const [currentMonth, setCurrentMonth] = useState(() => dateInputValue(new Date()).slice(0, 7));
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    const updateMonth = () => {
+      clearTimeout(timer);
+      const now = new Date();
+      setCurrentMonth(dateInputValue(now).slice(0, 7));
+      const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      timer = setTimeout(updateMonth, Math.min(nextMonth.getTime() - now.getTime(), 24 * 60 * 60 * 1000));
+    };
+    updateMonth();
+    window.addEventListener("focus", updateMonth);
+    return () => { clearTimeout(timer); window.removeEventListener("focus", updateMonth); };
+  }, []);
+  const [monthYear, monthNumber] = currentMonth.split("-").map(Number);
+  const monthFrom = `${currentMonth}-01`;
+  const monthTo = dateInputValue(new Date(monthYear, monthNumber, 0));
   const auth = useQuery({ queryKey: ["session"], queryFn: async () => (await api.get("/auth/me")).data });
   useEffect(() => {
     if (auth.isError) void navigate({ to: "/login" });
@@ -120,6 +142,11 @@ export function AdminPage() {
     queryFn: async () => (await api.get<SalesReport>("/crm/reports", { params: { from: reportFrom, to: reportTo } })).data,
     enabled: auth.isSuccess && Boolean(reportFrom && reportTo && reportFrom <= reportTo),
   });
+  const monthReport = useQuery({
+    queryKey: ["crm-report", monthFrom, monthTo],
+    queryFn: async () => (await api.get<SalesReport>("/crm/reports", { params: { from: monthFrom, to: monthTo } })).data,
+    enabled: auth.isSuccess,
+  });
   const detail = useQuery({
     queryKey: ["lead-detail", selectedLead],
     queryFn: async () => (await api.get<LeadDetail>(`/leads/${selectedLead}`)).data.lead,
@@ -129,7 +156,7 @@ export function AdminPage() {
   const stageMutation = useMutation({
     mutationFn: async ({ id, stage, lostReason, salePriceCents, sellerId }: { id: string; stage: string; lostReason?: string; salePriceCents?: string; sellerId?: string }) => api.patch(`/crm/leads/${id}/stage`, { stage, lostReason, salePriceCents, sellerId }),
     onSuccess: async () => {
-      await Promise.all([cache.invalidateQueries({ queryKey: ["leads"] }), cache.invalidateQueries({ queryKey: ["crm-overview"] }), cache.invalidateQueries({ queryKey: ["lead-detail"] }), cache.invalidateQueries({ queryKey: ["inventory-sellers"] })]);
+      await Promise.all([cache.invalidateQueries({ queryKey: ["leads"] }), cache.invalidateQueries({ queryKey: ["crm-overview"] }), cache.invalidateQueries({ queryKey: ["crm-report"] }), cache.invalidateQueries({ queryKey: ["lead-detail"] }), cache.invalidateQueries({ queryKey: ["inventory-sellers"] })]);
     },
   });
   const noteMutation = useMutation({
@@ -215,10 +242,10 @@ export function AdminPage() {
             </Card>
 
             <Card className="rounded-2xl p-5 shadow-none">
-              <div className="flex items-center justify-between"><div><p className="text-sm font-bold">Etapas no período</p><p className="mt-1 text-xs text-muted">Etapa atual dos leads recebidos no intervalo</p></div><ClipboardList size={18} className="text-pine" /></div>
+              <div className="flex items-center justify-between"><div><p className="text-sm font-bold">Etapas no período</p><p className="mt-1 text-xs text-muted">Etapa atual dos leads recebidos no mês atual, independentemente do filtro do relatório</p>{monthReport.data && <p className="mt-1 text-xs font-semibold text-pine">Período: {reportDateLabel(monthReport.data.period.from)} a {reportDateLabel(monthReport.data.period.to)}</p>}</div><ClipboardList size={18} className="text-pine" /></div>
               <div className="mt-4 h-[230px]">
-                {report.isLoading ? <p className="pt-20 text-center text-xs text-muted">Carregando relatório...</p> : <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={leadStages.map((stage) => ({ name: stageLabels[stage], total: report.data?.byStage[stage] ?? 0 }))} margin={{ left: -20, right: 6, top: 4, bottom: 4 }}>
+                {monthReport.isLoading ? <p className="pt-20 text-center text-xs text-muted">Carregando relatório...</p> : monthReport.isError ? <p className="pt-20 text-center text-xs text-red-700" role="alert">{errorMessage(monthReport.error)}</p> : monthReport.data && <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={leadStages.map((stage) => ({ name: stageLabels[stage], total: monthReport.data.byStage[stage] ?? 0 }))} margin={{ left: -20, right: 6, top: 4, bottom: 4 }}>
                     <CartesianGrid stroke="#e9ede6" vertical={false} />
                     <XAxis dataKey="name" tick={{ fontSize: 9, fill: "#718074" }} axisLine={false} tickLine={false} interval={0} angle={-30} textAnchor="end" height={55} />
                     <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: "#718074" }} axisLine={false} tickLine={false} />
@@ -229,6 +256,35 @@ export function AdminPage() {
               </div>
             </Card>
           </div>
+
+          <Card className="rounded-2xl p-5 shadow-none">
+            <h3 className="text-sm font-bold">Leads e vendas por origem</h3>
+            <p className="mt-1 text-xs text-muted">Leads recebidos no período selecionado e, entre eles, os que estão atualmente em Venda concluída.</p>
+            {report.data && <p className="mt-1 text-xs font-semibold text-pine">Período: {reportDateLabel(report.data.period.from)} a {reportDateLabel(report.data.period.to)}</p>}
+            {report.isLoading ? <p className="mt-4 text-xs text-muted">Carregando relatório...</p> : report.isError ? <p className="mt-4 text-xs text-red-700" role="alert">{errorMessage(report.error)}</p> : !reportFrom || !reportTo || reportFrom > reportTo ? <p className="mt-4 text-xs text-muted">Selecione um período válido.</p> : report.data && report.data.bySource.some(({ won }) => typeof won !== "number") ? <p className="mt-4 text-xs text-red-700" role="alert">Não foi possível carregar as vendas por origem. Atualize a API e tente novamente.</p> : report.data?.bySource.length ? <>
+              <div className="mt-4 overflow-x-auto">
+                <div style={{ minWidth: Math.max(480, report.data.bySource.length * 120), height: 320 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={report.data.bySource} margin={{ left: -20, right: 12, top: 10, bottom: 4 }}>
+                      <CartesianGrid stroke="#e9ede6" vertical={false} />
+                      <XAxis dataKey="source" tick={{ fontSize: 10, fill: "#718074" }} axisLine={false} tickLine={false} interval={0} angle={-30} textAnchor="end" height={80} />
+                      <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: "#718074" }} axisLine={false} tickLine={false} />
+                      <Tooltip cursor={{ fill: "#f7f8f3" }} />
+                      <Legend />
+                      <Bar dataKey="total" name="Leads recebidos" fill="#224d38" radius={[5, 5, 0, 0]} />
+                      <Line dataKey="won" name="Venda concluída" type="linear" stroke="#d97706" strokeWidth={3} dot={{ r: 5 }} activeDot={{ r: 7 }} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead><tr className="text-muted"><th className="py-2 pr-3">Origem</th><th className="px-3 py-2 text-right">Leads recebidos</th><th className="pl-3 py-2 text-right">Venda concluída</th></tr></thead>
+                  <tbody className="divide-y divide-black/5">{report.data.bySource.map(({ source, total, won }) => <tr key={source}><td className="py-2 pr-3">{source}</td><td className="px-3 py-2 text-right">{total}</td><td className="pl-3 py-2 text-right">{won}</td></tr>)}</tbody>
+                </table>
+              </div>
+            </> : <p className="mt-4 text-xs text-muted">Nenhum lead recebido no período.</p>}
+          </Card>
 
           <div className="grid gap-5 lg:grid-cols-2">
             {reportBreakdowns.map(({ title, rows }) => (
@@ -274,7 +330,7 @@ export function AdminPage() {
                 <thead className="bg-[#fafbf8] text-[10px] uppercase tracking-wider text-muted"><tr><th className="px-5 py-3 font-bold">Contato</th><th className="px-4 py-3 font-bold">Interesse</th><th className="px-4 py-3 font-bold">Etapa</th><th className="px-4 py-3 font-bold">Origem</th><th className="px-4 py-3 font-bold">Recebido</th><th className="px-5 py-3" /></tr></thead>
                 <tbody className="divide-y divide-black/5">
                   {leads.data.items.map((lead) => <tr key={lead.id} className="hover:bg-[#fafbf8]">
-                    <td className="px-5 py-4"><button className="text-left" onClick={() => setSelectedLead(lead.id)}><p className="font-bold">{lead.name}</p><p className="mt-1 text-[10px] text-muted">{lead.phone}</p></button></td>
+                    <td className="px-5 py-4"><button className="text-left" onClick={() => setSelectedLead(lead.id)}><p className="font-bold">{lead.name}</p><p className="mt-1 text-[10px] text-muted">{lead.phone}</p></button>{lead.isRemarketing && <div className="mt-2"><RemarketingBadge /></div>}</td>
                     <td className="px-4 py-4 text-ink/75">{lead.motorcycle ? `${lead.motorcycle.brand} ${lead.motorcycle.model}` : "Geral"}</td>
                     <td className="px-4 py-4"><div className="flex flex-col gap-2">
                       <select aria-label={`Etapa de ${lead.name}`} className="max-w-40 rounded-lg border border-black/10 bg-white px-2 py-2 text-[10px] font-semibold" value={lead.stage} disabled={stageMutation.isPending} onChange={async (event) => {
@@ -329,6 +385,7 @@ export function AdminPage() {
           <aside className="h-full w-full max-w-xl overflow-y-auto bg-white p-6 shadow-2xl sm:p-8" role="dialog" aria-modal="true" aria-label="Detalhes do lead">
             <div className="flex items-start justify-between"><div><p className="text-xs font-bold uppercase tracking-widest text-pine">Ficha do contato</p><h2 className="mt-2 text-2xl font-black">{detail.data?.name ?? "Carregando..."}</h2></div><button onClick={() => setSelectedLead(null)} aria-label="Fechar" className="rounded-full p-2 hover:bg-paper"><X size={18} /></button></div>
             {detail.data && <div className="mt-6 space-y-5">
+              {detail.data.isRemarketing && <RemarketingBadge />}
               <div className="grid grid-cols-2 gap-3 text-xs"><div className="rounded-xl bg-paper p-3"><p className="text-muted">Telefone</p><p className="mt-1 font-bold">{detail.data.phone}</p></div><div className="rounded-xl bg-paper p-3"><p className="text-muted">E-mail</p><p className="mt-1 break-all font-bold">{detail.data.email || "Não informado"}</p></div><div className="rounded-xl bg-paper p-3"><p className="text-muted">Vendedor</p><p className="mt-1 font-bold">{detail.data.seller?.name || "A definir"}</p></div><div className="rounded-xl bg-paper p-3"><p className="text-muted">Origem</p><p className="mt-1 font-bold">{detail.data.source}</p></div></div>
               <div><p className="text-sm font-bold">Histórico</p><form className="mt-3 flex gap-2" onSubmit={(event) => { event.preventDefault(); if (note.trim()) noteMutation.mutate(); }}><input className="field-input" placeholder="Adicionar anotação interna..." value={note} onChange={(event) => setNote(event.target.value)} /><Button size="small" type="submit" disabled={!note.trim() || noteMutation.isPending}>Salvar</Button></form>
                 {noteMutation.isError && <p className="mt-2 text-xs text-red-700">{errorMessage(noteMutation.error)}</p>}

@@ -75,6 +75,7 @@ export function ContactsPage() {
         cache.invalidateQueries({ queryKey: ["lead-detail"] }),
         cache.invalidateQueries({ queryKey: ["whatsapp-chats"] }),
         cache.invalidateQueries({ queryKey: ["crm-overview"] }),
+        cache.invalidateQueries({ queryKey: ["crm-report"] }),
       ]);
     },
   });

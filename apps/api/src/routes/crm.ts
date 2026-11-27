@@ -166,12 +166,13 @@ export async function crmRoutes(app: FastifyInstance) {
           seller: { select: { id: true, name: true, slug: true } },
           motorcycle: { select: { id: true, brand: true, model: true, slug: true } },
           activities: { orderBy: { createdAt: "desc" }, take: 1, select: { createdAt: true } },
+          stageHistory: { where: { fromStage: LeadStage.LOST, toStage: LeadStage.NEW }, take: 1, select: { id: true } },
         },
       }),
       prisma.lead.count({ where }),
     ]);
     return reply.send({
-      items,
+      items: items.map(({ stageHistory, ...lead }) => ({ ...lead, isRemarketing: stageHistory.length > 0 })),
       pagination: { page: query.page, limit: query.limit, total, pages: Math.ceil(total / query.limit) },
     });
   });
@@ -222,7 +223,12 @@ export async function crmRoutes(app: FastifyInstance) {
           && (activity.content.startsWith("Mensagem recebida pelo WhatsApp: ") || activity.content.startsWith("Mensagem enviada pelo WhatsApp: ")));
       });
     }
-    return reply.send({ lead });
+    return reply.send({
+      lead: {
+        ...lead,
+        isRemarketing: lead.stageHistory.some((entry) => entry.fromStage === LeadStage.LOST && entry.toStage === LeadStage.NEW),
+      },
+    });
   });
 
   app.patch("/leads/:id/contact", {
@@ -441,10 +447,11 @@ export async function crmRoutes(app: FastifyInstance) {
       soldAt: { gte: from, lt: toExclusive },
     };
 
-    const [total, byStage, bySource, bySeller, sales, dailyTrend] = await Promise.all([
+    const [total, byStage, bySource, wonBySource, bySeller, sales, dailyTrend] = await Promise.all([
       prisma.lead.count({ where }),
       prisma.lead.groupBy({ by: ["stage"], where, _count: { _all: true } }),
       prisma.lead.groupBy({ by: ["source"], where, _count: { _all: true }, orderBy: { _count: { id: "desc" } } }),
+      prisma.lead.groupBy({ by: ["source"], where: { ...where, stage: LeadStage.WON }, _count: { _all: true } }),
       prisma.lead.groupBy({ by: ["sellerId"], where, _count: { _all: true }, orderBy: { _count: { id: "desc" } } }),
       prisma.lead.aggregate({
         where: salesWhere,
@@ -466,6 +473,7 @@ export async function crmRoutes(app: FastifyInstance) {
       ? await prisma.seller.findMany({ where: { id: { in: sellerIds } }, select: { id: true, name: true } })
       : [];
     const sellerNames = new Map(sellers.map(({ id, name }) => [id, name]));
+    const wonCounts = new Map(wonBySource.map(({ source, _count }) => [source, _count._all]));
     const leadsWon = byStage.find(({ stage }) => stage === LeadStage.WON)?._count._all ?? 0;
     const revenue = sales._sum.salePriceCents ?? 0n;
 
@@ -480,7 +488,7 @@ export async function crmRoutes(app: FastifyInstance) {
         revenueCents: revenue.toString(),
       },
       byStage: Object.fromEntries(byStage.map(({ stage, _count }) => [stage, _count._all])),
-      bySource: bySource.map(({ source, _count }) => ({ source, total: _count._all })),
+      bySource: bySource.map(({ source, _count }) => ({ source, total: _count._all, won: wonCounts.get(source) ?? 0 })),
       bySeller: bySeller.map(({ sellerId: id, _count }) => ({
         sellerId: id,
         sellerName: id ? sellerNames.get(id) ?? "Vendedor removido" : "Sem atribuição",
