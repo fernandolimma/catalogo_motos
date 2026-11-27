@@ -63,7 +63,7 @@ export function AdminShell({ children, userName, role, fullScreen = false }: Adm
           </>}
         </nav>
         <div className="hidden px-4 pb-5 lg:mt-auto lg:block">
-          <a href="/" className="mb-4 flex items-center justify-between rounded-xl border border-white/10 px-3 py-3 text-xs font-semibold text-white/75 transition hover:bg-white/5 hover:text-white">
+          <a href="/" target="_blank" rel="noopener noreferrer" className="mb-4 flex items-center justify-between rounded-xl border border-white/10 px-3 py-3 text-xs font-semibold text-white/75 transition hover:bg-white/5 hover:text-white">
             Abrir catálogo público <ExternalLink size={14} />
           </a>
           <div className="flex items-center gap-3 border-t border-white/10 pt-4">

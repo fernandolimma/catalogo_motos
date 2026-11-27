@@ -1,0 +1,17 @@
+{
+  "id": "/",
+  "name": "Independência Motos",
+  "short_name": "IndMotos",
+  "description": "Catálogo de motocicletas e atendimento da Independência Motos.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#142018",
+  "theme_color": "#142018",
+  "lang": "pt-BR",
+  "icons": [
+    { "src": "/pwa-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/pwa-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/pwa-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

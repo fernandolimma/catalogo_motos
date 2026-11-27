@@ -103,6 +103,10 @@ Para ativar o GTM no catálogo público, defina `VITE_GTM_ID` no `.env` e recons
 
 O GTM é uma aplicação de página única: configure no próprio contêiner as tags, os eventos e a medição de navegação desejados, evitando enviar dados pessoais, parâmetros sensíveis ou conteúdo de formulários. Antes de ativar tags, revise o aviso de privacidade e suas configurações de consentimento e compartilhamento de dados.
 
+### Aplicativo instalável (PWA)
+
+O catálogo e o CRM podem ser instalados pelo menu do navegador, em HTTPS ou em `localhost`. No iPhone/iPad, use Compartilhar e depois “Adicionar à Tela de Início”. O catálogo, o CRM e o WhatsApp exigem conexão; se uma navegação ocorrer sem internet, o aplicativo apresenta uma página de aviso. O service worker armazena somente essa página, não os dados de clientes nem as respostas da API.
+
 ## Funcionalidades disponíveis
 
 ### Catálogo e captação
